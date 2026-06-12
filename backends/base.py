@@ -12,6 +12,7 @@ class InferenceRequest:
     sys_inst: str
     prompt_text: str
     ground_truth: str = ""
+    task: str = ""
 
 
 class ModelBackend(ABC):

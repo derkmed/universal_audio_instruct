@@ -56,10 +56,14 @@ class Evaluator:
         all_predictions: List[str] = []
         all_references: List[str] = []
 
+        # Opened once here; each batch flushes to it so results survive a mid-run crash.
         jsonl_file = self._open_jsonl(self.config.output_dir)
         try:
+            # Single executor shared across batches so preprocessing for batch N+1
+            # can overlap with GPU inference for batch N.
             with ThreadPoolExecutor(max_workers=self.config.num_preprocessing_workers) as executor:
                 for batch in _batched(samples, self.config.batch_size):
+                    # Parallel audio decode + resample, then one GPU forward pass.
                     requests = self._preprocess_batch(batch, preprocess_fn, executor)
                     predictions = self.backend.generate_batch(requests)
 
@@ -74,13 +78,16 @@ class Evaluator:
                         if jsonl_file:
                             record = {
                                 "index": n - 1,
+                                "dataset": self.config.dataset_name,
+                                "split": self.config.dataset_split,
+                                "task": req.task,
                                 "sys_inst": req.sys_inst,
                                 "prompt": req.prompt_text,
                                 "ground_truth": req.ground_truth,
                                 "prediction": pred,
                             }
                             jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-                            jsonl_file.flush()
+                            jsonl_file.flush()  # persist after every sample; safe to interrupt
         finally:
             if jsonl_file:
                 jsonl_file.close()
@@ -132,6 +139,7 @@ class Evaluator:
                 sys_inst=(s.get("system_instruction") or "").strip(),
                 prompt_text=(s.get("prompt") or "").strip(),
                 ground_truth=(s.get("output") or "").strip(),
+                task=(s.get("task") or "").strip(),
             )
             for idx, s in enumerate(batch)
         ]
