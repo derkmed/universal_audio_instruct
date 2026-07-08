@@ -46,29 +46,38 @@ These are plain data files the loader downloads at runtime — keep them:
 - `universal_audio_dataset_configs/*.json` — named run configs.
 - `README.md`, `.gitattributes`.
 
-## HF-repo cleanup (prepare-don't-delete — run only when confident)
+## HF-repo cleanup
 
-Once you've validated a real run against the Hub, these files in the **HF dataset
-repo** are now duplicated by `uad_data/` and can be removed there so the code has
-a single source of truth in this repo:
+The new loader has been validated against the real dataset (offline synthetic
+fixture in `tests/`, plus a real-data run over the local Clotho copy).
+
+**Safe to delete now — the loading script itself:**
 
 ```
-Universal-Audio-Understanding.py   # the loading script itself
-tasks.py
-io_templates.py
-prompts.py
-sample.py
-filters.py
-internal_dataset.py
-internal_datasets.py
-json_config_loader.py
-__init__.py                        # only if it exists solely to support the above
+Universal-Audio-Understanding.py
 ```
 
-> Note: the HF repo also holds other Python tooling not touched by this migration
-> (`gemini_inference.py`, `gemini_prepare_data.py`, `token_counter.py`, `main.py`,
-> and the `utils/`, `evaluation/`, `report_scripts/` dirs). Those are a separate
-> decision — decide per-file whether they belong in this code repo too.
+Nothing else imports it, and removing it is what actually takes the dataset "off
+loading scripts": it disables the `trust_remote_code` entry point so no one can
+silently keep using the old loader.
+
+**Do NOT delete yet — the helper modules.** They are duplicated in `uad_data/`,
+but other tooling still in the HF repo imports them:
+
+| Helper module (HF repo) | Still imported by |
+| --- | --- |
+| `sample.py` | `gemini_prepare_data.py` |
+| `tasks.py` | `main.py`, `utils/json_config_loader.py`, and the other helpers |
+| `filters.py`, `internal_dataset.py`, `internal_datasets.py` | `utils/json_config_loader.py` |
+| `io_templates.py`, `prompts.py`, `json_config_loader.py` | the other helpers |
+
+Delete these (and the empty `__init__.py`) only after that tooling is migrated to
+import from `uad_data` or removed.
+
+> Other tooling in the HF repo not touched by this migration: `gemini_inference.py`,
+> `gemini_prepare_data.py`, `token_counter.py`, `main.py`, `utils/`, `evaluation/`,
+> `report_scripts/`. Separate decision — note `utils/json_config_loader.py` is a
+> stale duplicate of the root `json_config_loader.py`.
 
 ## How to run
 
