@@ -4,9 +4,11 @@ A `TrainBackend` mirrors the eval `ModelBackend` split: model-specific code
 (processor usage, chat templating, audio handling) lives in one subclass per
 model family, everything else is shared. A training backend owns:
 
-  * the loaded model + processor, quantized 4-bit and LoRA-wrapped when
-    `config.use_qlora` (the QLoRA recipe from
-    https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora), and
+  * the loaded model + processor. Two independent config knobs pick the mode:
+    `load_in_4bit` (NF4-quantize the frozen base) and `use_lora` (train adapters
+    instead of all weights). Both on = QLoRA, the recipe from
+    https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora;
+    LoRA-only keeps the base in bf16; both off = full finetune.
   * `collate(rows)` -- the HF Trainer `data_collator`. It receives raw
     `uad_data` row dicts and returns a padded batch of tensors with `labels`.
 
@@ -34,8 +36,8 @@ class TrainBackend(ABC):
         self.config = config
         self.processor = self._load_processor()
         self.model = self._load_model()
-        if config.use_qlora:
-            self.model = self._apply_qlora(self.model)
+        if config.use_lora:
+            self.model = self._apply_lora(self.model)
         if config.gradient_checkpointing:
             self.model.config.use_cache = False  # incompatible with checkpointing
 
@@ -57,11 +59,11 @@ class TrainBackend(ABC):
         ...
 
     # ------------------------------------------------------------------
-    # Shared QLoRA plumbing
+    # Shared quantization / LoRA plumbing
     # ------------------------------------------------------------------
 
     def _quantization_config(self):
-        """4-bit NF4 quantization for the frozen base model (QLoRA)."""
+        """4-bit NF4 quantization for the frozen base model (the Q in QLoRA)."""
         from transformers import BitsAndBytesConfig
         return BitsAndBytesConfig(
             load_in_4bit=True,
@@ -70,10 +72,12 @@ class TrainBackend(ABC):
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
 
-    def _apply_qlora(self, model):
+    def _apply_lora(self, model):
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-        model = prepare_model_for_kbit_training(
-            model, use_gradient_checkpointing=self.config.gradient_checkpointing)
+        if self.config.load_in_4bit:
+            # k-bit prep (norm upcasting, input grads) only applies to quantized bases.
+            model = prepare_model_for_kbit_training(
+                model, use_gradient_checkpointing=self.config.gradient_checkpointing)
         lora = LoraConfig(
             r=self.config.lora_r,
             lora_alpha=self.config.lora_alpha,

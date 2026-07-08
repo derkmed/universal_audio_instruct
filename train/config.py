@@ -31,8 +31,13 @@ class TrainConfig:
     target_sr: int = 16_000
     max_audio_seconds: int = 30
 
-    # QLoRA
-    use_qlora: bool = True          # 4-bit base + LoRA adapters; False = full finetune
+    # Finetuning mode: two independent knobs spanning three modes.
+    #   load_in_4bit=True,  use_lora=True   -> QLoRA   (default; fits Qwen-30B on one A100)
+    #   load_in_4bit=False, use_lora=True   -> LoRA    (bf16 base; faster, no quant noise)
+    #   load_in_4bit=False, use_lora=False  -> full finetune (all params; most VRAM)
+    # (4-bit without LoRA is rejected: a quantized base can't be trained directly.)
+    load_in_4bit: bool = True
+    use_lora: bool = True
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
@@ -55,6 +60,13 @@ class TrainConfig:
 
     # Auth
     hf_token: Optional[str] = None
+
+    def __post_init__(self):
+        if self.load_in_4bit and not self.use_lora:
+            raise ValueError(
+                "load_in_4bit without use_lora is not supported: a 4-bit quantized "
+                "base cannot be trained directly. Use LoRA, or disable 4-bit for a "
+                "full finetune (--no-4bit --no-lora).")
 
     @property
     def resolved_model_path(self) -> str:

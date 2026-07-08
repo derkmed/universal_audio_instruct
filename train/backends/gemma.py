@@ -29,7 +29,7 @@ class GemmaTrainBackend(TrainBackend):
             torch_dtype=torch.bfloat16,
             token=self.config.hf_token,
         )
-        if self.config.use_qlora:
+        if self.config.load_in_4bit:
             kwargs["quantization_config"] = self._quantization_config()
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         return model

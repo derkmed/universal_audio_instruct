@@ -58,8 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lr", type=float, default=2e-4, dest="learning_rate")
     p.add_argument("--lora-r", type=int, default=16, dest="lora_r")
     p.add_argument("--lora-alpha", type=int, default=32, dest="lora_alpha")
-    p.add_argument("--no-qlora", action="store_false", dest="use_qlora",
-                   help="Full finetune instead of 4-bit QLoRA (needs much more VRAM)")
+    p.add_argument("--no-4bit", action="store_false", dest="load_in_4bit",
+                   help="Keep the base model in bf16 instead of 4-bit NF4 "
+                        "(LoRA without quant noise; needs more VRAM)")
+    p.add_argument("--no-lora", action="store_false", dest="use_lora",
+                   help="Train all weights instead of LoRA adapters (full finetune; "
+                        "requires --no-4bit and much more VRAM)")
 
     p.add_argument("--hf-token", default=None, dest="hf_token",
                    help="HuggingFace token (falls back to HF_TOKEN env var)")
@@ -84,7 +88,8 @@ def main() -> None:
         learning_rate=args.learning_rate,
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
-        use_qlora=args.use_qlora,
+        load_in_4bit=args.load_in_4bit,
+        use_lora=args.use_lora,
         hf_token=hf_token,
     )
 
@@ -116,7 +121,7 @@ def main() -> None:
         seed=config.seed,
         bf16=True,
         gradient_checkpointing=config.gradient_checkpointing,
-        optim="paged_adamw_8bit" if config.use_qlora else "adamw_torch",
+        optim="paged_adamw_8bit" if config.load_in_4bit else "adamw_torch",
         report_to="none",
         # Our dataset yields raw dicts consumed by backend.collate; without this
         # the Trainer would strip every column it doesn't recognize.

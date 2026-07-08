@@ -10,7 +10,16 @@ identical rows, and each supported model has one backend in each harness:
 | Gemma (`GEMMA-4`) | `eval.backends.GemmaBackend` | `train.backends.GemmaTrainBackend` |
 | Qwen3-Omni (`QWEN3-Omni`) | `eval.backends.QwenBackend` | `train.backends.QwenTrainBackend` |
 
-QLoRA recipe follows the Gemma guide:
+Three finetuning modes via two independent flags (`load_in_4bit`, `use_lora`):
+
+| mode | flags | when |
+| --- | --- | --- |
+| **QLoRA** (default) | — | Qwen3-Omni-30B, or any GPU where bf16 weights don't fit |
+| **LoRA** (bf16 base) | `--no-4bit` | Gemma on an A100 — faster steps, no quantization noise |
+| **Full finetune** | `--no-4bit --no-lora` | small models, max fidelity, most VRAM |
+
+(4-bit without LoRA is rejected — a quantized base can't be trained directly.)
+The QLoRA recipe follows the Gemma guide:
 https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora
 (4-bit NF4 base via `bitsandbytes`, LoRA adapters via `peft`, paged 8-bit AdamW).
 
@@ -43,8 +52,8 @@ python -m train.main --model GEMMA-4 \
     --batch-size 2 --grad-accum 8 --lr 2e-4 --output-dir outputs/gemma_clotho
 ```
 
-Key flags: `--model {GEMMA-4,QWEN3-Omni}`, `--lora-r/--lora-alpha`, `--no-qlora`
-(full finetune), `--max-samples` (smoke tests). The LoRA adapter + processor are
+Key flags: `--model {GEMMA-4,QWEN3-Omni}`, `--lora-r/--lora-alpha`, `--no-4bit`
+(bf16 LoRA), `--no-4bit --no-lora` (full finetune), `--max-samples` (smoke tests). The LoRA adapter + processor are
 saved to `--output-dir`; evaluate the result by passing that directory to
 `python -m eval.main --model ... --model-path <output-dir>` (after merging the
 adapter, or loading it with `peft`).

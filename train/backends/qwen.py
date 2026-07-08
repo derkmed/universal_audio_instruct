@@ -35,7 +35,7 @@ class QwenTrainBackend(TrainBackend):
             device_map="auto",
             attn_implementation="sdpa",
         )
-        if self.config.use_qlora:
+        if self.config.load_in_4bit:
             kwargs["quantization_config"] = self._quantization_config()
         return Qwen3OmniMoeForConditionalGeneration.from_pretrained(model_id, **kwargs)
 
