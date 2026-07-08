@@ -6,7 +6,7 @@ from typing import List
 
 import evaluate as hf_evaluate
 
-from .audio_utils import preprocess_audio
+from uad_data.audio_utils import preprocess_audio
 from .backends.base import InferenceRequest, ModelBackend
 from .config import EvalConfig
 

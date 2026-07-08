@@ -10,7 +10,7 @@ from typing import List
 import torch
 from transformers import AutoModelForCausalLM, AutoProcessor
 
-from eval.audio_utils import preprocess_audio
+from uad_data.audio_utils import preprocess_audio
 from .base import TrainBackend
 
 
