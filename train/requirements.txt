@@ -1,0 +1,4 @@
+# Training-only extras (installed on top of the repo's root requirements.txt).
+# transformers / datasets / accelerate / bitsandbytes are already in ../requirements.txt.
+peft
+trl

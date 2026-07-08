@@ -85,11 +85,11 @@ import from `uad_data` or removed.
 ```bash
 pip install -r requirements.txt
 # run from the repo root (the eval harness is now the `eval` package)
-python -m eval.main --model GEMMA-4 --json-config clotho_config.json --split test
+python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json --split test
 ```
 
-`--json-config` accepts either a local path (e.g. `clotho_config.json`) or the
-name of a config hosted in the repo's `universal_audio_dataset_configs/` folder.
+`--json-config` accepts either a local path (e.g. `configs/clotho_config.json`) or
+the name of a config hosted in the repo's `universal_audio_dataset_configs/` folder.
 
 ## How to test (no GPU, no 48 GB download)
 

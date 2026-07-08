@@ -27,7 +27,7 @@ class EvalConfig:
     dataset_split: str = "test"
     # Local path to a UAD JSON config, or the name of one hosted in the repo's
     # universal_audio_dataset_configs/ folder (see uad_data.loader).
-    json_config_path: str = "clotho_config.json"
+    json_config_path: str = "configs/clotho_config.json"
 
     # Model
     model_path: Optional[str] = None  # overrides DEFAULT_MODEL_PATHS if set

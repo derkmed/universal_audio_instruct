@@ -36,9 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--json-config",
-        default="clotho_config.json",
+        default="configs/clotho_config.json",
         dest="json_config_path",
-        help="UAD dataset JSON config (default: clotho_config.json)",
+        help="UAD dataset JSON config (default: configs/clotho_config.json)",
     )
     p.add_argument("--batch-size", type=int, default=4, dest="batch_size")
     p.add_argument(
