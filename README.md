@@ -1,4 +1,4 @@
-# audio_instruct
+# universal_audio_instruct
 
 Tooling for the **Universal Audio Understanding** audio-instruction benchmark:
 loading the dataset, evaluating models on it, and (in progress) finetuning models
