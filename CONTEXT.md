@@ -42,6 +42,10 @@ _Avoid_: UAD config, collection
 A split that a run actually loads for an internal dataset: one that the run config lists for that dataset and that the run also asked for.
 _Avoid_: configured split, active split
 
+**Smoke archive**:
+A small archive for one internal dataset that holds the first few clips of each of its splits, in archive order. Smoke archives are published on the Hub for smoke runs to use.
+_Avoid_: cache, sample archive
+
 **Smoke run**:
 A training or evaluation run that loads only the first few clips, in archive order, of each selected split of each internal dataset, to check that each one works end to end.
 _Avoid_: debug run, sampled run
