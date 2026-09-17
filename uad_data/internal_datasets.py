@@ -10,6 +10,10 @@ import datasets
 from .internal_dataset import InternalDataset
 from .tasks import Task
 
+# Each description is the corpus's own summary, kept in its own words. CONTEXT.md's
+# glossary governs UAD's code and docs, not these texts, so a corpus may call a clip
+# a "sample", an "example" or an "utterance" here.
+#
 # All datasets, in case-insensitive alphabetical order.
 LIBRICSS_DESCRIPTION = '''Continuous speech separation (CSS) is an approach tohandling overlapped
 speech in conversational audio signals. A real recorded dataset, called LibriCSS, is derived from
@@ -125,12 +129,10 @@ DATASETS = [
     ),
     InternalDataset(
         name='MELD',
-        # "clips" replaces the corpus's own "utterances": MELD calls a whole clip an
-        # utterance, but in CONTEXT.md an Utterance is part of a clip.
         description=(
             'MELD contains the same dialogue instances available in EmotionLines, but it also '
             'encompasses audio and visual modality along with text. MELD has more than 1400 '
-            'dialogues and 13000 clips from Friends TV series.'
+            'dialogues and 13000 utterances from Friends TV series.'
         ),
         tasks=[Task.CLASSIFICATION],
         splits=[datasets.Split.TRAIN, datasets.Split.TEST,
@@ -234,11 +236,9 @@ DATASETS = [
     ),
     InternalDataset(
         name='URDU',
-        # "clips" replaces the corpus's own "utterances": URDU calls a whole clip an
-        # utterance, but in CONTEXT.md an Utterance is part of a clip.
         description=(
-            'URDU dataset contains emotional clips of Urdu speech gathered from Urdu '
-            'talk shows. It contains 400 clips of four basic emotions: Angry, Happy, '
+            'URDU dataset contains emotional utterances of Urdu speech gathered from Urdu '
+            'talk shows. It contains 400 utterances of four basic emotions: Angry, Happy, '
             'Neutral, and Sad. There are 38 speakers (27 male and 11 female).'
         ),
         tasks=Task.CLASSIFICATION,
