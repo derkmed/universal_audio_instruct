@@ -19,13 +19,17 @@ Those six are every task the `complete-1..5` run configs use. Any other task has
 no preliminary metric, and reports `None` throughout.
 
 Each rule reads its answer down to the one thing it compares: the reference
-words, the category's words, the choice letter, the numbers. An answer that
-leaves that empty -- a blank transcription, a `commonsense_answer` with no
-leading choice letter, a `qa` answer with no numbers -- is one the rule cannot
-read. Those rows report `None` and are left out of their group's hit rate,
-because a rule that cannot tell right from wrong must not report either: a
-group of them would otherwise read 1.0000 or 0.0000, indistinguishable from a
-model that got everything right or nothing.
+words, the category's words, the choice letter, the numbers.
+
+Which rows a group covers is decided by status alone, as the spec decides it:
+every row with a prediction, `ok` and `empty_output` alike. An answer that its
+rule reads as nothing is not excluded, it is simply judged by that rule -- a
+`commonsense_answer` with no choice letter has none to be started with, so the
+row misses; a `qa` answer with no numbers has none missing from the prediction,
+so the row hits. Two consequences are worth knowing when reading a number: a
+`qa` group of free-text answers reports a hit rate of 1.0, and a `commonsense`
+group whose answers carry no choice letters reports 0.0. These metrics are
+preliminary and never decide whether a group passes.
 
 `metric_value` gives one row's value; `aggregate` gives a group's. A WER group is
 corpus-level -- one `wer.compute` over every row -- not the mean of the rows'
@@ -81,12 +85,15 @@ def _category_appears(category: str, prediction: str) -> bool:
     Both sides are normalised to space-separated words first, so "car_horn"
     matches "I hear a car horn." Matching on words rather than on a run of
     letters keeps a short category like "car" out of "a carpet on the floor".
+
+    A row with no category has none to appear, so it misses.
     """
-    return f" {category} " in f" {_normalise(prediction)} "
+    return bool(category) and f" {category} " in f" {_normalise(prediction)} "
 
 
 def _same_choice_letter(letter: str, prediction: str) -> bool:
-    return _choice_letter(prediction) == letter
+    """A row whose answer has no choice letter has none to be started with."""
+    return bool(letter) and _choice_letter(prediction) == letter
 
 
 def _numbers_all_appear(numbers: frozenset, prediction: str) -> bool:
@@ -152,19 +159,18 @@ def answer_of(row: dict) -> str:
 def metric_value(row: dict, prediction: str) -> Optional[float]:
     """One row's metric value: its WER, or 1.0/0.0 for a hit-rate task.
 
-    None when the task has no metric, or when the rule cannot read this row's
-    answer. A row with no WER of its own still counts in its group -- see
-    `aggregate` -- while an unreadable hit-rate row does not.
+    None only when the task has no metric, or when a WER row has no reference
+    words of its own, which leaves that row's WER undefined. It still counts in
+    its group -- see `aggregate`. Every hit-rate row has a value.
     """
     metric = _METRICS.get(row.get("task", ""))
     if metric is None:
         return None
 
     reading = metric.read(answer_of(row))
-    if not reading:
-        return None
-
     if metric.hit is None:
+        if not reading:
+            return None  # no reference words, so no WER to divide
         return _wer(predictions=[prediction], references=[reading])
     return _hit(metric, reading, prediction)
 
@@ -174,13 +180,15 @@ def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[floa
 
     Pass every row that has a prediction -- `ok` and `empty_output` -- and no
     others: a row that never reached the model has nothing to compare and
-    already fails its group.
+    already fails its group. Every row passed in counts, none is filtered out
+    here.
 
     A WER group is one corpus WER over all of them, so a row whose own reference
     is blank still contributes the words the model invented for it. A hit-rate
-    group averages only the rows its rule can read.
+    group is the mean of their hits.
 
-    None when the task has no metric, and when nothing readable is left.
+    None when the task has no metric, when there are no rows, and when a WER
+    group's references are all blank.
     """
     metric = _METRICS.get(task)
     if metric is None:
@@ -197,9 +205,7 @@ def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[floa
         return _wer(
             predictions=[prediction for _, prediction in pairs], references=references)
 
-    hits = [_hit(metric, reading, prediction) for reading, prediction in pairs if reading]
-    if not hits:
-        return None
+    hits = [_hit(metric, reading, prediction) for reading, prediction in pairs]
     return sum(hits) / len(hits)
 
 

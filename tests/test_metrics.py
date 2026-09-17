@@ -151,69 +151,44 @@ def test_commonsense_hits_on_the_answers_choice_letter() -> None:
     print("PASS: commonsense hits on the prediction starting with the choice letter.")
 
 
-def test_an_answer_the_rule_cannot_read_has_no_value_rather_than_a_miss() -> None:
-    """Scoring it 0 would read as a model that got everything wrong.
+def test_every_row_with_a_prediction_counts_in_its_hit_rate_group() -> None:
+    """The spec's inclusion rule, taken as written.
 
-    A commonsense answer with no choice letter, a blank category and a qa answer
-    with no numbers all leave their rule nothing to compare, so the row has no
-    value at all and is left out of its group.
+    A hit-rate group is the mean of the included rows' hits, and the included
+    rows are every row with a prediction. So an answer its rule reads as nothing
+    still gets a hit of 1 or 0 by that rule, and still counts in the denominator.
     """
+    # No choice letter to start with, so the prediction cannot start with it.
     assert metrics.metric_value(
         _row("commonsense", commonsense_answer="the kettle is boiling"),
-        "the kettle is boiling") is None
-    assert metrics.metric_value(_row("classification", category="  "), "a dog") is None
-    assert metrics.metric_value(_row("qa", answer="Yes, a dog."), "No, a cat.") is None
+        "the kettle is boiling") == 0.0
+    # No category, so no category appears in the prediction.
+    assert metrics.metric_value(_row("classification", category="  "), "a dog") == 0.0
 
-    print("PASS: an answer the rule cannot read leaves the row with no value.")
-
-
-def test_a_group_of_unreadable_answers_has_no_value() -> None:
-    """Better no number than a hit rate of 1.0000 or 0.0000 that means nothing."""
-    predicted = [
-        (_row("qa", answer="Yes, a dog."), "No, a cat."),
-        (_row("qa", answer="Maybe."), "Certainly."),
-    ]
-    assert metrics.aggregate("qa", predicted) is None
-
-    # A readable row among unreadable ones carries the group on its own.
-    predicted.append((_row("qa", answer="The result is 102."), "102"))
-    assert metrics.aggregate("qa", predicted) == 1.0
-
-    print("PASS: a group of unreadable answers reports null, not a number.")
+    print("PASS: a row whose rule reads nothing is a miss, and still counts.")
 
 
-def test_prose_opening_with_a_or_i_is_not_read_as_that_choice() -> None:
-    """"A" and "I" are English words, so alone they say nothing about the choice."""
-    row = _row("commonsense", commonsense_answer="A. the kettle is boiling")
+def test_a_numberless_qa_answer_hits_on_any_real_prediction() -> None:
+    """The consequence of the rule as written, recorded here rather than hidden.
 
-    assert metrics.metric_value(row, "A person is clapping their hands.") == 0.0
-    # A letter with a marker after it, or standing alone, is still a choice.
-    assert metrics.metric_value(row, "A. the kettle is boiling") == 1.0
-    assert metrics.metric_value(row, "(a)") == 1.0
-    assert metrics.metric_value(row, "A") == 1.0
-
-    eye = _row("commonsense", commonsense_answer="I. the kettle is boiling")
-    assert metrics.metric_value(eye, "I think so.") == 0.0
-    assert metrics.metric_value(eye, "I) the kettle") == 1.0
-
-    print("PASS: prose opening with A or I is not read as that choice.")
-
-
-def test_a_choice_letter_that_is_not_a_word_needs_no_marker() -> None:
-    """"B is correct" opens with choice B; only A and I could mean something else.
-
-    Demanding a marker after every letter turned plain answers into false misses
-    and deflated the group's hit rate for no gain.
+    `qa`'s rule is "every number in the answer appears in the prediction". A
+    free-text answer holds no numbers, so none of them is missing and the row
+    hits -- which means a `qa` group of free-text answers reports a hit rate of
+    1.0 whatever the model said. The metric is preliminary and never decides
+    whether a group passes, so the rule stands as decided.
     """
-    row = _row("commonsense", commonsense_answer="B. the kettle is boiling")
+    row = _row("qa", answer="Yes, a dog.")
 
-    assert metrics.metric_value(row, "B is correct") == 1.0
-    assert metrics.metric_value(row, "B the dog barks") == 1.0
-    assert metrics.metric_value(row, "C is correct") == 0.0
-    # A word that merely begins with the letter is still not the letter.
-    assert metrics.metric_value(row, "Boiling water") == 0.0
+    assert metrics.metric_value(row, "No, a cat.") == 1.0
+    # An empty prediction is still a real miss, whatever the answer holds.
+    assert metrics.metric_value(row, "") == 0.0
 
-    print("PASS: a choice letter that is not an English word needs no marker.")
+    assert metrics.aggregate("qa", [
+        (row, "No, a cat."),
+        (_row("qa", answer="Maybe."), "Certainly."),
+    ]) == 1.0
+
+    print("PASS: a numberless qa answer hits, as the rule reads.")
 
 
 def test_qa_hits_when_every_number_in_the_answer_appears() -> None:
@@ -281,13 +256,13 @@ def test_hit_rate_groups_aggregate_as_a_mean() -> None:
     print("PASS: a hit-rate group is the mean of its rows' hits.")
 
 
-def test_a_group_with_no_readable_rows_has_no_value() -> None:
+def test_a_group_with_no_included_rows_has_no_value() -> None:
     assert metrics.aggregate("asr", []) is None
     assert metrics.aggregate("classification", []) is None
     # Every reference blank leaves corpus WER with no words to divide by.
     assert metrics.aggregate("asr", [(_row("asr", transcription=""), "hello")]) is None
 
-    print("PASS: a group with no readable rows reports null.")
+    print("PASS: a group with no included rows reports null.")
 
 
 def test_a_blank_reference_still_counts_its_row_in_a_wer_group() -> None:

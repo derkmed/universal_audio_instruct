@@ -80,5 +80,5 @@ The one rough metric an evaluation run reports for each task: WER for asr, engli
 _Avoid_: score, accuracy
 
 **Answer field**:
-The plain metadata field a task's preliminary metric reads a row against — a caption's `caption`, a qa row's `answer` — as opposed to the rendered `output`, which wraps that answer in template prose. A row whose answer field leaves its rule nothing to compare (a `commonsense_answer` with no leading choice letter, a `qa` answer with no numbers) has no metric value and is left out of its group's hit rate.
+The plain metadata field a task's preliminary metric reads a row against — a caption's `caption`, a qa row's `answer` — as opposed to the rendered `output`, which wraps that answer in template prose. Which rows a group's metric covers is decided by row status alone: every row with a prediction. An answer field its rule reads as nothing is judged by that rule like any other, not excluded — a `commonsense_answer` with no choice letter has none to be started with, so the row misses.
 _Avoid_: reference (a WER reference is one answer field, not all of them), label
