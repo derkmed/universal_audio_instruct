@@ -111,6 +111,12 @@ class Task(enum.Enum):
         key of the same name (libricss_subseg's `start_time`) never leaks into the
         template. A missing field raises KeyError naming the clip, rather than
         rendering as a blank.
+
+        `utterance_index` must be an int (not a bool) in
+        `0..len(transcriptions) - 1` for asr_timestamp_search, and `None` for every
+        other task, which has no utterances to pick from. Anything else raises
+        ValueError naming the row, rather than rendering another utterance
+        (a negative index) or a row whose `utterance_index` means nothing.
         """
         where = f'{self.value} row for {record.get("audio_path")!r}'
         source, keys = record, self.features.keys()
@@ -122,11 +128,20 @@ class Task(enum.Enum):
                     f'got {utterances!r:.80}')
             if utterance_index is None:
                 raise ValueError(f'{where}: pass the index of the utterance to render.')
-            where += f' (utterance {utterance_index})'
+            where += f' (utterance {utterance_index!r})'
+            if (not isinstance(utterance_index, int) or isinstance(utterance_index, bool)
+                    or not 0 <= utterance_index < len(utterances)):
+                raise ValueError(
+                    f'{where}: the clip has {len(utterances)} utterance(s), '
+                    f'so the index must be an int in 0..{len(utterances) - 1}.')
             source = utterances[utterance_index]
             keys = self.features['transcriptions'][0].keys()
             if not isinstance(source, dict):
                 raise ValueError(f'{where}: expected an object, got {source!r:.80}')
+        elif utterance_index is not None:
+            raise ValueError(
+                f'{where}: only asr_timestamp_search rows pick an utterance, '
+                f'got utterance_index={utterance_index!r}')
         missing = [k for k in keys if k not in source]
         if missing:
             raise KeyError(f'{where} has no {", ".join(map(repr, missing))}')
