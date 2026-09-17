@@ -34,7 +34,8 @@ The order in which an internal dataset's clips are stored in its audio archive. 
 
 **Row**:
 One clip rendered for one task with one prompt template; the unit a model sees. For asr_timestamp_search, each utterance of the clip is rendered as its own rows.
-_Avoid_: example, sample
+_Avoid_: example, sample. HF `datasets` and the Trainer call a row an "example", but here that word blurs clips and rows, and the smoke-run cap counts clips, not rows. Renaming everything to Example was considered and not taken (2026-09-17).
+TODO(derkmed): revisit Row vs Example one day.
 
 ## Runs
 
