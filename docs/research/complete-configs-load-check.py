@@ -15,7 +15,8 @@ checkout, including commit 8f0b6f9, it misreports those datasets in two ways:
   * the field check counts `transcriptions:list` under `non_string_values`.
 From per-utterance rendering (PR #14) on, it also builds `Sample` without an
 `utterance_index`, so every (row, template) pair counts as a render error.
-Before PR #14, those rows rendered with blank utterance fields.
+Before PR #14, those rows count as rendered OK even though their utterance
+fields are blank; only `undefined_template_vars` shows it.
 complete-1..5 don't use these datasets, so the default run is unaffected.
 
 Standard library only. `uad_data` imports three third-party packages that are
