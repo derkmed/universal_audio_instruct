@@ -294,7 +294,7 @@ def test_internal_datasets_that_failed_to_load_are_listed_and_fail_the_run() -> 
 
 def test_results_jsonl_keeps_todays_fields_and_adds_the_new_ones() -> None:
     # The prediction matches the plain caption, not the rendered output, so a
-    # metric of 0.0 is itself evidence of which field the row is scored against.
+    # metric of 0.0 is itself evidence of which field the row is read against.
     _, records, _, _ = _run([ROWS[0]], ScriptedBackend(["a cat meows"]), clips_per_split=1)
 
     record = records[0]

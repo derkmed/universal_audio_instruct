@@ -148,9 +148,10 @@ For a dataset called `MyDataset`:
    ```
 
    The evaluator reports one group per (internal dataset, split, task): its row
-   statuses, whether it passed, and one preliminary metric for its task (WER or
-   a hit rate). Metrics are for information only; a group passes when it has
-   rows and every one of them is `ok`.
+   statuses, whether it passed, and one preliminary metric for its task — WER
+   for asr, english_translation and caption, a hit rate for classification,
+   commonsense and qa, and nothing for any other task. Metrics are for
+   information only; a group passes when it has rows and every one is `ok`.
 
 | Symptom | Likely cause |
 | --- | --- |
