@@ -182,18 +182,38 @@ def test_a_group_of_unreadable_answers_has_no_value() -> None:
     print("PASS: a group of unreadable answers reports null, not a number.")
 
 
-def test_a_prediction_opening_with_prose_is_not_a_choice_letter() -> None:
-    """Otherwise every prose answer starting "A ..." or "I ..." hits choice A or I."""
+def test_prose_opening_with_a_or_i_is_not_read_as_that_choice() -> None:
+    """"A" and "I" are English words, so alone they say nothing about the choice."""
     row = _row("commonsense", commonsense_answer="A. the kettle is boiling")
 
     assert metrics.metric_value(row, "A person is clapping their hands.") == 0.0
-    assert metrics.metric_value(row, "I think so.") == 0.0
     # A letter with a marker after it, or standing alone, is still a choice.
     assert metrics.metric_value(row, "A. the kettle is boiling") == 1.0
     assert metrics.metric_value(row, "(a)") == 1.0
     assert metrics.metric_value(row, "A") == 1.0
 
-    print("PASS: a prose prediction is not read as a choice letter.")
+    eye = _row("commonsense", commonsense_answer="I. the kettle is boiling")
+    assert metrics.metric_value(eye, "I think so.") == 0.0
+    assert metrics.metric_value(eye, "I) the kettle") == 1.0
+
+    print("PASS: prose opening with A or I is not read as that choice.")
+
+
+def test_a_choice_letter_that_is_not_a_word_needs_no_marker() -> None:
+    """"B is correct" opens with choice B; only A and I could mean something else.
+
+    Demanding a marker after every letter turned plain answers into false misses
+    and deflated the group's hit rate for no gain.
+    """
+    row = _row("commonsense", commonsense_answer="B. the kettle is boiling")
+
+    assert metrics.metric_value(row, "B is correct") == 1.0
+    assert metrics.metric_value(row, "B the dog barks") == 1.0
+    assert metrics.metric_value(row, "C is correct") == 0.0
+    # A word that merely begins with the letter is still not the letter.
+    assert metrics.metric_value(row, "Boiling water") == 0.0
+
+    print("PASS: a choice letter that is not an English word needs no marker.")
 
 
 def test_qa_hits_when_every_number_in_the_answer_appears() -> None:

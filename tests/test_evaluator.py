@@ -214,6 +214,44 @@ def test_a_row_that_never_reached_the_model_keeps_its_prompt_in_the_record() -> 
     print("PASS: a row that never ran still records its prompt and ground truth.")
 
 
+def test_a_metric_that_raises_does_not_take_the_run_down() -> None:
+    """Metrics are information only, so one must never cost the run its output.
+
+    `evaluate.load` reaches the Hub on a cold cache, and it runs per row inside
+    the batch loop; before this the first asr row could abort everything and
+    leave no summary.json behind.
+    """
+    from eval import metrics as metrics_module
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("metric unavailable")
+
+    original = metrics_module.metric_value, metrics_module.aggregate
+    metrics_module.metric_value, metrics_module.aggregate = _boom, _boom
+    try:
+        summary, records, _, _ = _run(list(ROWS), clips_per_split=1)
+    finally:
+        metrics_module.metric_value, metrics_module.aggregate = original
+
+    assert [r["status"] for r in records] == ["ok", "ok", "ok"], records
+    assert all(r["metric_value"] is None for r in records), records
+    assert all(g["metric_value"] is None for g in summary["groups"]), summary
+    assert summary["passed"] is True, summary
+
+    print("PASS: a metric that raises costs the run its numbers, not its output.")
+
+
+def test_a_row_with_no_audio_at_all_is_an_audio_error() -> None:
+    """Not just undecodable bytes: a row missing the field entirely."""
+    rows = [ROWS[0], {**_row("test/x.wav", "test", "silence"), "audio": None}]
+
+    _, records, _, _ = _run(rows, ScriptedBackend(["a cat meows"]), clips_per_split=1)
+
+    assert [r["status"] for r in records] == ["ok", "audio_error"], records
+
+    print("PASS: a row with no audio becomes audio_error, not a dead run.")
+
+
 def test_a_row_that_failed_to_render_is_reported_from_the_load_report() -> None:
     rows = LoadedRows([ROWS[0]], _report(
         clips_per_split=1,
