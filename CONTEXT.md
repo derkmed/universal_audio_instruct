@@ -49,3 +49,23 @@ _Avoid_: cache, sample archive
 **Smoke run**:
 A training or evaluation run that loads only the first few clips, in archive order, of each selected split of each internal dataset, to check that each one works end to end.
 _Avoid_: debug run, sampled run
+
+**Regular run**:
+A training or evaluation run with no cap on clips per split. It stops at the first error, where a smoke run records the error and carries on.
+_Avoid_: full run (a regular run can still use a small run config)
+
+**Load report**:
+The record that comes back with a run's rows: clips found for each internal dataset and selected split, internal datasets that failed to load, and rows that failed to render.
+
+## Results
+
+**Row status**:
+How one row of an evaluation run ended: `ok`, `empty_output`, `render_error`, `audio_error` or `model_error`. Only `ok` means the model returned non-empty text.
+
+**Group**:
+The rows of one evaluation run that share an internal dataset, split and task. A group passes when it has at least one row and every row's status is `ok`.
+_Avoid_: bucket, slice
+
+**Preliminary metric**:
+The one rough metric an evaluation run reports for each task: WER for asr, english_translation and caption, and a hit rate for the rest. It is for information only and never decides whether a group passes.
+_Avoid_: score, accuracy
