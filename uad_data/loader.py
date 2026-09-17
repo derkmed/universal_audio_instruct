@@ -43,7 +43,6 @@ from typing import Any, Iterator
 import datasets
 
 from . import hub
-from . import io_templates
 from . import prompts as prompts_lib
 from .collection import UadCollection
 from .internal_dataset import InternalDataset
@@ -119,6 +118,14 @@ def _template_rng(
     return random.Random(int.from_bytes(digest[:8], "big"))
 
 
+class PromptTemplateError(ValueError):
+    """A task has no usable prompt templates: a config or Hub problem, not a data defect.
+
+    Every clip of the task would fail the same way, so this stops the run even in
+    a smoke run, where a failure to load or render is recorded and stepped over.
+    """
+
+
 def _get_prompt_templates(task: Task, rng: random.Random | None):
     """Select prompt/instruction/output template tuples for a task from PROMPTS_DIR.
 
@@ -127,13 +134,13 @@ def _get_prompt_templates(task: Task, rng: random.Random | None):
     files = glob.glob(f"{prompts_lib.PROMPTS_DIR}/*.json")
     prompt_files = [prompts_lib.PromptFilepath(filepath=f) for f in files]
     if task not in {pf.task for pf in prompt_files}:
-        raise RuntimeError(
+        raise PromptTemplateError(
             f"No prompt file exists for {task} in {prompts_lib.PROMPTS_DIR}/.")
     task_prompt_files = [pf for pf in prompt_files if pf.accepts_task(task)]
     if not task_prompt_files:
-        raise ValueError(f"No prompt files found for task: {task}")
+        raise PromptTemplateError(f"No prompt files found for task: {task}")
     if len(task_prompt_files) > 1:
-        raise ValueError(
+        raise PromptTemplateError(
             f"Multiple prompt files correspond to task: {task_prompt_files}. Should only be 1.")
     task_prompt_file = task_prompt_files[0]
     if rng is not None:
@@ -164,7 +171,7 @@ def _open_archive(data_url: str, *, stream: bool, repo_id: str, revision, token)
             yield archive
 
 
-def iter_rows(
+def _iter_rows(
     collection: UadCollection,
     split: str | datasets.Split,
     *,
@@ -239,6 +246,9 @@ def _rows_until_failure(
             row = next(dataset_rows)
         except StopIteration:
             break
+        except PromptTemplateError:
+            # A config problem, not this internal dataset's data: stop the run.
+            raise
         except Exception as error:
             logger.warning(
                 "Failed to load %s after %d rows; moving on: %s",
@@ -367,22 +377,8 @@ def _clip_rows(
             rng = _template_rng(
                 seed, internal_dataset.name, split, audio_path, task, utterance_index,
             ) if randomize else None
-            try:
-                templates = _get_prompt_templates(task, rng)
-            except Exception as error:
-                if render_failures is None:
-                    raise
-                # With no template to render, ask the filter about a blank one.
-                placeholder = Row(
-                    audio_path=audio_path, dataset_name=internal_dataset.name,
-                    split=split, task=task, audio_data=file_bytes, metadata=record,
-                    prompt_template=io_templates.PromptTemplate(task=task, template=""),
-                    utterance_index=utterance_index)
-                if collection.row_filter.include_row(placeholder):
-                    counts = True
-                    failed(task, utterance_index, error)
-                continue
-            for si_t, p_t, o_t in templates:
+            # A task with no templates raises (PromptTemplateError), in smoke runs too.
+            for si_t, p_t, o_t in _get_prompt_templates(task, rng):
                 row = Row(
                     audio_path=audio_path,
                     dataset_name=internal_dataset.name,
@@ -457,7 +453,7 @@ def load_uad_dataset(
 
     collection = UniversalJsonConfig(filepath=config_path).toCollection()
     report = LoadReport(clips_per_split=clips_per_split)
-    rows = list(iter_rows(
+    rows = list(_iter_rows(
         collection, split,
         repo_id=repo_id, revision=revision, token=token,
         clips_per_split=clips_per_split, seed=seed, stream=stream, report=report))
