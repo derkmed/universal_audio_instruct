@@ -194,6 +194,14 @@ the existing `hub.download_file`.
     that `RandomFilter` does can't disturb the picks.
   - A clip therefore gets the same template in every run that includes it,
     whatever n or `--split` is.
+- **Per-utterance picks ([#14], [#18]):** asr_timestamp_search renders one row
+  per utterance, and all utterances of a clip share the key above. Each
+  utterance needs its own pick, so for a row that has an `utterance_index`, the
+  index is added to the digest. Rows without one (every other task) keep the
+  key above unchanged.
+  - `test_random_templates_are_picked_per_utterance` checks this. It fails if
+    every utterance of a clip gets the same template; don't weaken it to match
+    a per-clip key.
 - `load_uad_dataset` takes `seed`, defaulting to 42.
   - Eval gains `--seed` and `EvalConfig.seed`, defaulting to 42.
   - Training gains `--seed`, defaulting to 42. It feeds the existing
@@ -496,6 +504,12 @@ In `uad_data/loader.py`:
   from a stable digest (`hashlib`) of the seed, internal dataset, split, audio
   path and task. Don't use `hash()`: it's salted per process, so the picks
   would change between runs.
+  - For asr_timestamp_search rows, which are one per utterance, also add the
+    row's `utterance_index` to the digest, so each utterance gets its own pick
+    (see [Seed and prompt templates](#seed-and-prompt-templates-4-7)).
+  - This loader also serves regular runs of datasets that smoke runs leave out
+    (libricss, libricss_subseg, SparseLibriMix), so their tests must stay
+    green too.
 - **Raise** when no internal dataset matches the request.
 
 S1 tests to write at minimum:
@@ -511,7 +525,8 @@ S1 tests to write at minimum:
   recording how far it was read;
 - one clip getting the same template at n = 1 and n = 2 and across different
   `split` values;
-- `RandomFilter` not changing which templates get picked.
+- `RandomFilter` not changing which templates get picked;
+- `test_random_templates_are_picked_per_utterance` staying green.
 
 ### 3. Loader: load report and smoke-run tolerance (S1)
 
@@ -770,3 +785,5 @@ See [Acceptance](#acceptance).
 [#8]: https://github.com/derkmed/universal_audio_instruct/issues/8
 [#11]: https://github.com/derkmed/universal_audio_instruct/issues/11
 [#12]: https://github.com/derkmed/universal_audio_instruct/issues/12
+[#14]: https://github.com/derkmed/universal_audio_instruct/pull/14
+[#18]: https://github.com/derkmed/universal_audio_instruct/issues/18
