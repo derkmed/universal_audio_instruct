@@ -23,10 +23,11 @@ A system-instruction, prompt, and expected-output pattern that renders a clip's 
 
 **Clip**:
 One audio file in one split of one internal dataset.
-_Avoid_: example, element, sample
+_Avoid_: example, element, sample, utterance
 
 **Utterance**:
-One entry in a clip's `transcriptions` list: a start time, an end time and what is said between them. Only asr_timestamp_search uses utterances.
+One entry in a clip's `transcriptions` list: a start time, an end time and what is said between them. An utterance is always part of a clip, never a whole clip. Only asr_timestamp_search uses utterances.
+Some corpora call a whole clip an utterance: MELD's `Utterance` field holds a clip's text, and its `Utterance_ID` field and `dia<N>_utt<M>.wav` file names number clips. In those names, read "utterance" as clip.
 _Avoid_: segment (LibriCSS's `segment` field numbers a libricss clip within its recording session)
 
 **Archive order**:

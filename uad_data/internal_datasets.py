@@ -128,7 +128,7 @@ DATASETS = [
         description=(
             'MELD contains the same dialogue instances available in EmotionLines, but it also '
             'encompasses audio and visual modality along with text. MELD has more than 1400 '
-            'dialogues and 13000 utterances from Friends TV series.'
+            'dialogues and 13000 clips from Friends TV series.'
         ),
         tasks=[Task.CLASSIFICATION],
         splits=[datasets.Split.TRAIN, datasets.Split.TEST,
@@ -233,8 +233,8 @@ DATASETS = [
     InternalDataset(
         name='URDU',
         description=(
-            'URDU dataset contains emotional utterances of Urdu speech gathered from Urdu '
-            'talk shows. It contains 400 utterances of four basic emotions: Angry, Happy, '
+            'URDU dataset contains emotional clips of Urdu speech gathered from Urdu '
+            'talk shows. It contains 400 clips of four basic emotions: Angry, Happy, '
             'Neutral, and Emotion. There are 38 speakers (27 male and 11 female).'
         ),
         tasks=Task.CLASSIFICATION,
