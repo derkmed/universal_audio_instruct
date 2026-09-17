@@ -155,6 +155,7 @@ For a dataset called `MyDataset`:
 | `Task: [...]` or `Splits: [...] requested of MyDataset, which only contains ...` | The config asks for a task or split that the registry entry doesn't declare |
 | `No prompt file exists for Task.X` | The Hub has no `prompts/<task>.json` for that task |
 | `KeyError` while rendering a row | A metadata record is missing a field that its task's `Task.features` requires |
+| ``ValueError: asr_timestamp_search row for '…': `transcriptions` must be a non-empty list of utterances`` | An asr_timestamp_search record's `transcriptions` is missing, empty or not a list |
 | Hub "entry not found" / 404 | The file isn't at `data/MyDataset/MyDataset_<split>.json` or at `data_url` |
 | Loads 0 rows for the dataset | Archive member paths don't match `audio_path` (e.g. `./audio/x.wav` vs `audio/x.wav`) |
 

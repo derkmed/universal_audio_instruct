@@ -88,8 +88,10 @@ class Task(enum.Enum):
         asr_timestamp_search renders each utterance in the record's
         `transcriptions` list as its own rows, so this returns their indices.
         Every other task renders the whole record once: `[None]`. So does a
-        `transcriptions` that is missing, empty or not a list, which leaves the
-        clip one row that fails in `render_context`.
+        `transcriptions` that is missing, empty or not a list. That gives the clip
+        one pass, and a pass is one row per prompt template (a single row when
+        templates are picked at random). Each of those rows fails in
+        `render_context`.
 
         Never raises: bad metadata is reported when a row renders, after the
         sample filter has decided whether that row is wanted at all.
