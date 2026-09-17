@@ -43,8 +43,6 @@ class Evaluator:
 
     def evaluate(self, dataset) -> dict:
         rows = list(dataset)
-        if self.config.max_samples is not None:
-            rows = rows[: self.config.max_samples]
 
         total = len(rows)
         print(f"Evaluating {total} rows (batch_size={self.config.batch_size})")
