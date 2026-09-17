@@ -51,11 +51,13 @@ SPLIT_NAMES = ("train", "validation", "test")
 ALL_SPLITS = "all"
 
 
-def parse_split(split: str) -> list[str] | None:
+def parse_split(split: str | datasets.Split) -> list[str] | None:
     """Parse a split request: `test`, `validation+test`, or `all` (None).
 
-    Raises ValueError for any name other than train, validation or test.
+    A `datasets.Split` is read as its name. Raises ValueError for any name
+    other than train, validation or test.
     """
+    split = str(split)
     if split == ALL_SPLITS:
         return None
     names = split.split("+")
@@ -156,7 +158,7 @@ def _open_archive(data_url: str, *, stream: bool, repo_id: str, revision, token)
 
 def iter_rows(
     collection: UadCollection,
-    split: str,
+    split: str | datasets.Split,
     *,
     repo_id: str,
     revision: str | None,
@@ -280,7 +282,7 @@ def _clip_rows(
 def load_uad_dataset(
     *,
     json_config_path: str,
-    split: str,
+    split: str | datasets.Split,
     repo_id: str = hub.DEFAULT_REPO_ID,
     revision: str | None = None,
     token: str | None = None,
