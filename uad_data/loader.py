@@ -307,7 +307,7 @@ def load_uad_dataset(
             with the same seed.
         stream: Read audio archives lazily over HTTP instead of downloading them
             in full, so an early stop transfers only the prefix consumed. Defaults
-            to True when `clips_per_split` is set and False otherwise -- full runs
+            to True when `clips_per_split` is set and False otherwise -- regular runs
             prefer the cached download. Streamed reads are not cached, so avoid
             stream=True for large or repeated runs.
 
