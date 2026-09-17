@@ -46,12 +46,14 @@ HIT_RATE = "hit_rate"
 _PUNCTUATION = str.maketrans({c: " " for c in string.punctuation})
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 # A leading multiple-choice letter: one letter, with nothing but punctuation or
-# whitespace ahead of it, and a choice marker or the end of the text after it.
-# "B. ...", "(b)" and a bare "B" match. "boiling" does not, because its "b" runs
-# into another letter -- and neither does "A person is clapping", because a
-# letter followed by prose is prose. Reading that as choice A would hand a free
-# hit to every prediction opening with "A " or "I ".
-_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])\s*(?:[^\w\s]|$)")
+# whitespace ahead of it, and not running into another word character. "B. ...",
+# "(b)", a bare "B" and "B is correct" all match; "boiling" does not.
+_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])(?!\w)")
+# "A" and "I" are also English words, so a prediction opening "A person is
+# clapping" or "I think so" says nothing about which choice it means. Those two
+# letters count only with a choice marker after them, or standing alone.
+_WORD_LETTERS = frozenset("ai")
+_MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])\s*(?:[^\w\s]|$)")
 
 # Loaded lazily and kept: `evaluate.load` reads from disk on every call.
 _wer_metric = None
@@ -65,7 +67,12 @@ def _normalise(text: str) -> str:
 def _choice_letter(text: str) -> str:
     """The multiple-choice letter `text` starts with, lowercased, or ""."""
     found = _CHOICE_LETTER.match(text)
-    return found.group(1).lower() if found else ""
+    if not found:
+        return ""
+    letter = found.group(1).lower()
+    if letter in _WORD_LETTERS and not _MARKED_CHOICE_LETTER.match(text):
+        return ""  # "A person is clapping" is prose, not choice A
+    return letter
 
 
 def _category_appears(category: str, prediction: str) -> bool:
@@ -159,12 +166,7 @@ def metric_value(row: dict, prediction: str) -> Optional[float]:
 
     if metric.hit is None:
         return _wer(predictions=[prediction], references=[reading])
-    # An empty prediction is a real miss, whatever the answer holds. Without
-    # this, `qa`'s rule would hit on an answer whose numbers are all absent
-    # from a prediction that has no words at all.
-    if not prediction.strip():
-        return 0.0
-    return float(metric.hit(reading, prediction))
+    return _hit(metric, reading, prediction)
 
 
 def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[float]:
@@ -195,13 +197,22 @@ def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[floa
         return _wer(
             predictions=[prediction for _, prediction in pairs], references=references)
 
-    hits = [
-        0.0 if not prediction.strip() else float(metric.hit(reading, prediction))
-        for reading, prediction in pairs if reading
-    ]
+    hits = [_hit(metric, reading, prediction) for reading, prediction in pairs if reading]
     if not hits:
         return None
     return sum(hits) / len(hits)
+
+
+def _hit(metric: "_Metric", reading, prediction: str) -> float:
+    """One hit-rate row: 1.0 or 0.0, with the empty-prediction rule written once.
+
+    An empty prediction is a real miss, whatever the answer holds. Without this,
+    `qa`'s rule would hit on an answer whose numbers are all absent from a
+    prediction that has no words at all.
+    """
+    if not prediction.strip():
+        return 0.0
+    return float(metric.hit(reading, prediction))
 
 
 def _wer(*, predictions: list[str], references: list[str]) -> float:

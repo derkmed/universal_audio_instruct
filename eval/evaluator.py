@@ -47,6 +47,22 @@ def _describe(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+def _or_none(metric_fn, *args):
+    """A preliminary metric's value, or None if computing it failed.
+
+    Metrics are information only -- "a group passes or fails on its row statuses,
+    never on these numbers" -- so one must never cost a run its `results.jsonl`
+    and `summary.json`. `evaluate.load` reaches the Hub on a cold cache, and this
+    runs per row inside the batch loop, so an offline runner or a Hub blip would
+    otherwise abort a smoke run built to tolerate far worse.
+    """
+    try:
+        return metric_fn(*args)
+    except Exception as error:
+        print(f"  metric unavailable: {_describe(error)}")
+        return None
+
+
 def print_group_table(summary: dict) -> None:
     """Print one line per group, then the overall result.
 
@@ -231,7 +247,7 @@ class Evaluator:
             "error": error,
             "metric": metrics.metric_name(task),
             "metric_value": (
-                None if prediction is None else metrics.metric_value(row, prediction)),
+                None if prediction is None else _or_none(metrics.metric_value, row, prediction)),
         }
 
     def _predict(
@@ -297,7 +313,11 @@ class Evaluator:
         A row whose audio won't decode gets its exception in place of a request.
         A regular run re-raises it instead.
         """
-        futures = [executor.submit(preprocess_fn, row["audio"]["bytes"]) for row in batch]
+        # The subscript is inside the submitted callable, so a row with no audio
+        # field at all fails the same way a row with undecodable bytes does,
+        # rather than raising in this thread and taking the run with it.
+        futures = [executor.submit(lambda r=row: preprocess_fn(r["audio"]["bytes"]))
+                   for row in batch]
 
         prepared: List[InferenceRequest | BaseException] = []
         for row, future in zip(batch, futures):
@@ -309,7 +329,7 @@ class Evaluator:
                 prepared.append(error)
                 continue
             prepared.append(InferenceRequest(
-                audio_bytes=row["audio"]["bytes"],
+                audio_bytes=row["audio"]["bytes"],  # read once the decode succeeded
                 audio_array=audio_array,
                 sys_inst=(row.get("system_instruction") or "").strip(),
                 prompt_text=(row.get("prompt") or "").strip(),
@@ -351,7 +371,8 @@ class Evaluator:
             group["statuses"][record["status"]] += 1
 
         for key, group in groups.items():
-            group["metric_value"] = metrics.aggregate(group["task"], predicted.get(key, []))
+            group["metric_value"] = _or_none(
+                metrics.aggregate, group["task"], predicted.get(key, []))
             group["passed"] = group["rows"] > 0 and group["statuses"]["ok"] == group["rows"]
 
         load_failures = [

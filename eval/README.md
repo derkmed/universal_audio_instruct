@@ -30,7 +30,7 @@ flowchart TD
     EV --> BATCH
     GEN -- "predictions" --> JSONL["results.jsonl<br/>(flushed per row — crash-safe)"]
     GEN -- "predictions" --> SCORE["eval/metrics.py<br/>one preliminary metric per task"]
-    SCORE --> SUM["groups (dataset, split, task):<br/>statuses, pass/fail, metric<br/>summary.json + console table"]
+    SCORE --> SUM["groups (internal dataset, split, task):<br/>statuses, pass/fail, metric<br/>summary.json + console table"]
 ```
 
 ## Pieces
