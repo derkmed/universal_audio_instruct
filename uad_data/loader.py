@@ -20,6 +20,12 @@ Pipeline per internal dataset, in run config order:
      utterance (see `Task.utterance_indices`); other tasks render it once,
   5. stop once every selected split is full or has found all its clips.
 
+The rows come back as a list with a `.report` (see `uad_data.load_report`): clips
+found per selected split, internal datasets that failed to load, and rows that
+failed to render. A smoke run (`clips_per_split` set) records those failures and
+carries on; a regular run raises on the first one. Splits that end with fewer
+clips than the cap log a warning.
+
 The archive is read one of two ways (see `_open_archive`): fully downloaded and
 cached via `hub.download_file` (default), or lazily streamed via
 `hub.open_archive_stream` so that stopping early (with `clips_per_split`) only
@@ -41,6 +47,7 @@ from . import prompts as prompts_lib
 from .collection import UadCollection
 from .internal_dataset import InternalDataset
 from .json_config_loader import UniversalJsonConfig
+from .load_report import LoadedRows, LoadFailure, LoadReport, RenderFailure, SplitReport
 from .row import Row
 from .tasks import Task
 
@@ -166,6 +173,7 @@ def iter_rows(
     clips_per_split: int | None = None,
     seed: int = 42,
     stream: bool = False,
+    report: LoadReport | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield expanded row dicts for the requested splits, one archive read per internal dataset.
 
@@ -176,9 +184,15 @@ def iter_rows(
     Reading an archive stops once every selected split is satisfied: full, or
     with every clip its metadata lists found. Raises ValueError when no internal
     dataset lists any requested split.
+
+    With `report`, records each selected split's clips found in it. A smoke
+    run (`clips_per_split` set) with a `report` also carries on past failures,
+    recording them there: an internal dataset that fails to load keeps the rows
+    read before the failure, and a row that fails to render is left out while
+    its clip still counts. Otherwise both errors propagate.
     """
     requested = parse_split(split)
-    randomize = collection.is_random_prompt_format_selection()
+    tolerant = report is not None and clips_per_split is not None
     selections = [
         (internal_dataset, selected)
         for internal_dataset in collection.internal_datasets
@@ -189,60 +203,123 @@ def iter_rows(
             f"No internal dataset in run config {collection.name!r} lists split {split!r}.")
 
     for internal_dataset, selected in selections:
-        # audio_path -> {split: record}, over every selected split.
-        clips: dict[str, dict[str, Any]] = {}
-        for split_name in selected:
-            metadata_path = hub.download_file(
-                internal_dataset.split_metadata_path(datasets.Split(split_name)),
-                repo_id=repo_id, revision=revision, token=token)
-            for audio_path, record in _load_split_metadata(
-                    metadata_path, internal_dataset.tasks).items():
-                clips.setdefault(audio_path, {})[split_name] = record
-
-        found = {split_name: 0 for split_name in selected}
-        # Clips each split lists that the archive hasn't reached yet.
-        unread = {split_name: set() for split_name in selected}
-        for audio_path, records in clips.items():
-            for split_name in records:
-                unread[split_name].add(audio_path)
-
-        def satisfied(split_name: str) -> bool:
-            return not unread[split_name] or (
-                clips_per_split is not None and found[split_name] >= clips_per_split)
-
-        # Read the archive as a sequential stream (archives are multi-GB); with
-        # stream=True only the prefix up to the early-stop point is downloaded.
-        with _open_archive(
-            internal_dataset.data_url, stream=stream,
+        found = {
+            split_name: SplitReport(
+                dataset=internal_dataset.name, split=split_name,
+                tasks=[task.value for task in internal_dataset.tasks])
+            for split_name in selected
+        }
+        if report is not None:
+            report.splits.extend(found.values())
+        dataset_rows = _dataset_rows(
+            collection, internal_dataset, found,
             repo_id=repo_id, revision=revision, token=token,
-        ) as archive:
-            for member in archive:
-                if all(satisfied(split_name) for split_name in selected):
-                    break
-                if not member.isfile() or member.name not in clips:
-                    continue
-                wanted = [
-                    (split_name, record)
-                    for split_name, record in clips[member.name].items()
-                    if not satisfied(split_name)
-                ]
-                for split_name in clips[member.name]:
-                    unread[split_name].discard(member.name)
-                if not wanted:
-                    continue
-                extracted = archive.extractfile(member)
-                if extracted is None:
-                    continue
-                file_bytes = extracted.read()
-                for split_name, record in wanted:
-                    kept = False
-                    for row in _clip_rows(
-                            collection, internal_dataset, split_name, member.name,
-                            file_bytes, record, randomize, seed):
-                        kept = True
-                        yield row
-                    if kept:
-                        found[split_name] += 1
+            clips_per_split=clips_per_split, seed=seed, stream=stream,
+            render_failures=report.render_failures if tolerant else None)
+        if tolerant:
+            yield from _rows_until_failure(dataset_rows, internal_dataset.name, report)
+        else:
+            yield from dataset_rows
+        if clips_per_split is not None:
+            for entry in found.values():
+                if entry.clips_found < clips_per_split:
+                    logger.warning(
+                        "%s %s has %d clip(s), fewer than the %d asked for.",
+                        entry.dataset, entry.split, entry.clips_found, clips_per_split)
+
+
+def _rows_until_failure(
+    dataset_rows: Iterator[dict[str, Any]], dataset: str, report: LoadReport,
+) -> Iterator[dict[str, Any]]:
+    """Yield an internal dataset's rows until they end or fail; record a failure in `report`."""
+    rows_kept = 0
+    while True:
+        try:
+            row = next(dataset_rows)
+        except StopIteration:
+            break
+        except Exception as error:
+            logger.warning(
+                "Failed to load %s after %d rows; moving on: %s",
+                dataset, rows_kept, error)
+            report.load_failures.append(LoadFailure(
+                dataset=dataset,
+                error=f"{type(error).__name__}: {error}",
+                rows_kept=rows_kept))
+            break
+        yield row
+        rows_kept += 1
+
+
+def _dataset_rows(
+    collection: UadCollection,
+    internal_dataset: InternalDataset,
+    found: dict[str, SplitReport],
+    *,
+    repo_id: str,
+    revision: str | None,
+    token: str | None,
+    clips_per_split: int | None,
+    seed: int,
+    stream: bool,
+    render_failures: list[RenderFailure] | None,
+) -> Iterator[dict[str, Any]]:
+    """Yield one internal dataset's rows from one archive read, counting clips in `found`.
+
+    `found` maps each selected split to its report entry.
+    """
+    randomize = collection.is_random_prompt_format_selection()
+    # audio_path -> {split: record}, over every selected split.
+    clips: dict[str, dict[str, Any]] = {}
+    for split_name in found:
+        metadata_path = hub.download_file(
+            internal_dataset.split_metadata_path(datasets.Split(split_name)),
+            repo_id=repo_id, revision=revision, token=token)
+        for audio_path, record in _load_split_metadata(
+                metadata_path, internal_dataset.tasks).items():
+            clips.setdefault(audio_path, {})[split_name] = record
+
+    # Clips each split lists that the archive hasn't reached yet.
+    unread = {split_name: set() for split_name in found}
+    for audio_path, records in clips.items():
+        for split_name in records:
+            unread[split_name].add(audio_path)
+
+    def satisfied(split_name: str) -> bool:
+        return not unread[split_name] or (
+            clips_per_split is not None and found[split_name].clips_found >= clips_per_split)
+
+    # Read the archive as a sequential stream (archives are multi-GB); with
+    # stream=True only the prefix up to the early-stop point is downloaded.
+    with _open_archive(
+        internal_dataset.data_url, stream=stream,
+        repo_id=repo_id, revision=revision, token=token,
+    ) as archive:
+        for member in archive:
+            if all(satisfied(split_name) for split_name in found):
+                break
+            if not member.isfile() or member.name not in clips:
+                continue
+            wanted = [
+                (split_name, record)
+                for split_name, record in clips[member.name].items()
+                if not satisfied(split_name)
+            ]
+            for split_name in clips[member.name]:
+                unread[split_name].discard(member.name)
+            if not wanted:
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                continue
+            file_bytes = extracted.read()
+            for split_name, record in wanted:
+                rows, counts = _clip_rows(
+                    collection, internal_dataset, split_name, member.name,
+                    file_bytes, record, randomize, seed, render_failures)
+                yield from rows
+                if counts:
+                    found[split_name].clips_found += 1
 
 
 def _clip_rows(
@@ -254,15 +331,39 @@ def _clip_rows(
     record: dict[str, Any],
     randomize: bool,
     seed: int,
-) -> Iterator[dict[str, Any]]:
-    """Yield one clip's rows for one split that pass the run's row filter."""
+    render_failures: list[RenderFailure] | None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """One clip's rendered rows for one split, and whether the clip counts.
+
+    The clip counts once one of its rows passes the run's row filter, whether or
+    not that row renders. With `render_failures`, a row that fails to render is
+    recorded there and left out; without it, the error propagates.
+    """
+    rows = []
+    counts = False
+
+    def failed(task: Task, utterance_index: int | None, error: Exception) -> None:
+        if render_failures is None:
+            raise error
+        render_failures.append(RenderFailure(
+            dataset=internal_dataset.name, split=split, task=task.value,
+            audio_path=audio_path, error=f"{type(error).__name__}: {error}",
+            utterance_index=utterance_index))
+
     for task in record["tasks"]:
         # One pass per utterance for asr_timestamp_search, one pass otherwise.
         for utterance_index in task.utterance_indices(record):
             rng = _template_rng(
                 seed, internal_dataset.name, split, audio_path, task, utterance_index,
             ) if randomize else None
-            for si_t, p_t, o_t in _get_prompt_templates(task, rng):
+            try:
+                templates = _get_prompt_templates(task, rng)
+            except Exception as error:
+                # No template means no row to filter, so the pass counts as wanted.
+                counts = True
+                failed(task, utterance_index, error)
+                continue
+            for si_t, p_t, o_t in templates:
                 row = Row(
                     audio_path=audio_path,
                     dataset_name=internal_dataset.name,
@@ -275,8 +376,14 @@ def _clip_rows(
                     output_template=o_t,
                     utterance_index=utterance_index,
                 )
-                if collection.row_filter.include_row(row):
-                    yield row.to_output()
+                if not collection.row_filter.include_row(row):
+                    continue
+                counts = True
+                try:
+                    rows.append(row.to_output())
+                except Exception as error:
+                    failed(task, utterance_index, error)
+    return rows, counts
 
 
 def load_uad_dataset(
@@ -289,7 +396,7 @@ def load_uad_dataset(
     clips_per_split: int | None = None,
     seed: int = 42,
     stream: bool | None = None,
-) -> list[dict[str, Any]]:
+) -> LoadedRows:
     """Load and expand the UAD dataset for a given config + split.
 
     Args:
@@ -314,7 +421,8 @@ def load_uad_dataset(
             stream=True for large or repeated runs.
 
     Returns:
-        A list of row dicts consumable directly by the Evaluator.
+        The row dicts, consumable directly by the Evaluator, as a list whose
+        `report` is the load report (see `uad_data.load_report`).
     """
     if clips_per_split is not None and clips_per_split < 1:
         raise ValueError(f"clips_per_split must be a positive integer, got {clips_per_split}.")
@@ -329,10 +437,12 @@ def load_uad_dataset(
         repo_id=repo_id, revision=revision, token=token)
 
     collection = UniversalJsonConfig(filepath=config_path).toCollection()
-    return list(iter_rows(
+    report = LoadReport(clips_per_split=clips_per_split)
+    rows = list(iter_rows(
         collection, split,
         repo_id=repo_id, revision=revision, token=token,
-        clips_per_split=clips_per_split, seed=seed, stream=stream))
+        clips_per_split=clips_per_split, seed=seed, stream=stream, report=report))
+    return LoadedRows(rows, report)
 
 
 def _resolve_config_path(
