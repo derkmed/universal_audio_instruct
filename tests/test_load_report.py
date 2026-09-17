@@ -78,8 +78,8 @@ def test_smoke_run_records_render_failures_and_still_counts_the_clip() -> None:
     print("PASS: a smoke run records and logs a render failure and still counts its clip.")
 
 
-def test_smoke_run_records_a_task_with_no_prompt_file_as_render_failures() -> None:
-    # The fixture has no commonsense prompt file.
+def test_smoke_run_records_a_task_with_no_prompt_templates_as_render_failures() -> None:
+    # The fixture has no commonsense prompt templates.
     config = {"name": "Clotho", "datasets": [
         {"name": "Clotho", "tasks": ["caption", "commonsense"], "splits": ["test"]}]}
     rows, _ = fx._load(fx.CLOTHO, config, split="test", clips_per_split=2)
@@ -97,11 +97,11 @@ def test_smoke_run_records_a_task_with_no_prompt_file_as_render_failures() -> No
     assert rows.report.splits[0].clips_found == 2, rows.report.splits
     assert len(rows.report.render_failures) == 2, rows.report.render_failures
 
-    print("PASS: a task with no prompt file fails each clip's render, and the clip counts.")
+    print("PASS: a task with no prompt templates fails each clip's render, and the clip counts.")
 
 
-def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_file() -> None:
-    # _RejectClipsFilter drops t0 and t1; the fixture has no commonsense prompt file.
+def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_templates() -> None:
+    # _RejectClipsFilter drops t0 and t1; the fixture has no commonsense prompt templates.
     fx.filters.FILTER_REGISTRY["reject_clips"] = fx._RejectClipsFilter
     try:
         members = [f"test/t{i}.wav" for i in range(4)]
@@ -122,7 +122,7 @@ def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_file() -
     print("PASS: a clip the row filter drops neither counts nor fails to render.")
 
 
-def test_regular_run_raises_on_a_task_with_no_prompt_file_even_if_filtered() -> None:
+def test_regular_run_raises_on_a_task_with_no_prompt_templates_even_if_filtered() -> None:
     # The random filter rejects about half the rows, so a regular run must raise
     # before it asks the filter.
     config = {"name": "Clotho", "row_filter": "random", "datasets": [
@@ -148,7 +148,7 @@ def test_regular_run_raises_on_a_task_with_no_prompt_file_even_if_filtered() -> 
     finally:
         del fx.filters.FILTER_REGISTRY["raising"]
 
-    print("PASS: a regular run raises on a missing prompt file before the filter runs.")
+    print("PASS: a regular run raises on missing prompt templates before the filter runs.")
 
 
 def test_regular_run_raises_on_a_render_failure() -> None:
