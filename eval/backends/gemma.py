@@ -13,7 +13,7 @@ class GemmaBackend(ModelBackend):
     Batching strategy:
       - apply_chat_template(tokenize=False) per row → formatted text string
         with audio placeholder tokens.
-      - processor(text=[...], audio=[...], padding=True) batches all samples in
+      - processor(text=[...], audio=[...], padding=True) batches all rows in
         one call; the processor handles audio feature extraction and padding.
       - model.generate runs once for the whole batch.
 
