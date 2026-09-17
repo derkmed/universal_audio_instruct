@@ -10,7 +10,9 @@ clip's metadata record, and a `tasks` list of `Task` values.
 Pipeline per selected internal dataset + split:
   1. obtain the audio archive and the split metadata JSON from the Hub,
   2. stream the tar archive, looking up each member's metadata by audio_path,
-  3. for every (task, prompt-template) combination, build a Sample and emit its row.
+  3. for every (task, render context, prompt-template) combination, build a Sample
+     and emit its row. A task has one render context per clip, except
+     asr_timestamp_search, which has one per segment (see `Task.render_contexts`).
 
 The archive is read one of two ways (see `_open_archive`): fully downloaded and
 cached via `hub.download_file` (default), or lazily streamed via
@@ -121,23 +123,26 @@ def iter_samples(
                 file_bytes = extracted.read()
                 record = metadata[sample_path]
                 for task in record["tasks"]:
-                    for si_t, p_t, o_t in _get_prompt_templates(task, randomize):
-                        sample = Sample(
-                            audio_path=sample_path,
-                            dataset_name=internal_dataset.name,
-                            split=metadata["split"],
-                            task=task,
-                            audio_data=file_bytes,
-                            metadata=record,
-                            system_instruction_template=si_t,
-                            prompt_template=p_t,
-                            output_template=o_t,
-                        )
-                        if collection.sample_filter.include_sample(sample):
-                            yield sample.to_output()
-                            count += 1
-                            if max_samples is not None and count >= max_samples:
-                                return
+                    # Usually one context per clip; asr_timestamp_search has one per segment.
+                    for context in task.render_contexts(record):
+                        for si_t, p_t, o_t in _get_prompt_templates(task, randomize):
+                            sample = Sample(
+                                audio_path=sample_path,
+                                dataset_name=internal_dataset.name,
+                                split=metadata["split"],
+                                task=task,
+                                audio_data=file_bytes,
+                                metadata=record,
+                                system_instruction_template=si_t,
+                                prompt_template=p_t,
+                                output_template=o_t,
+                                render_context=context,
+                            )
+                            if collection.sample_filter.include_sample(sample):
+                                yield sample.to_output()
+                                count += 1
+                                if max_samples is not None and count >= max_samples:
+                                    return
 
 
 def load_uad_dataset(

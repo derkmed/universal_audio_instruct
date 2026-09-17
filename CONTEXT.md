@@ -25,11 +25,14 @@ A system-instruction, prompt, and expected-output pattern that renders a clip's 
 One audio file in one split of one internal dataset.
 _Avoid_: example, element, sample
 
+**Segment**:
+One timed utterance within a clip: a start time, an end time and its transcription. Only asr_timestamp_search uses segments.
+
 **Archive order**:
 The order in which an internal dataset's clips are stored in its audio archive. It usually differs from the order of records in a split's metadata file.
 
 **Row**:
-One clip rendered for one task with one prompt template; the unit a model sees.
+One clip rendered for one task with one prompt template; the unit a model sees. For asr_timestamp_search, each segment of the clip is rendered as its own rows.
 _Avoid_: example, sample
 
 ## Runs

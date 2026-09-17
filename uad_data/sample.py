@@ -21,6 +21,9 @@ class Sample:
     system_instruction_template: io_templates.SystemInstructionTemplate | None = None
     prompt_template: io_templates.PromptTemplate | None = None
     output_template: io_templates.OutputTemplate | None = None
+    # Values the templates render with: one of `task.render_contexts(metadata)`.
+    # May be left out when the task renders the record as a single row.
+    render_context: dict[str, Any] | None = None
 
     def __post_init__(self):
         if self.system_instruction_template is None and self.prompt_template is None:
@@ -52,20 +55,27 @@ class Sample:
             example['output'] = self.build_output()
         return example
 
+    def _context(self) -> dict[str, Any]:
+        if self.render_context is not None:
+            return self.render_context
+        contexts = self.task.render_contexts(self.metadata)
+        if len(contexts) != 1:
+            raise ValueError(
+                f'{self.task.value} renders {len(contexts)} rows from {self.audio_path}; '
+                'pass one of them as render_context.')
+        return contexts[0]
+
     def build_system_instruction(self) -> str:
         if not self.system_instruction_template:
             raise ValueError('Sample does not contain a system instruction template.')
-        return self.system_instruction_template.make(
-            dict((k, self.metadata[k]) for k in self.task.features.keys()))
+        return self.system_instruction_template.make(self._context())
 
     def build_prompt(self) -> str:
         if not self.prompt_template:
             raise ValueError('Sample does not contain a prompt template.')
-        return self.prompt_template.make(
-            dict((k, self.metadata[k]) for k in self.task.features.keys()))
+        return self.prompt_template.make(self._context())
 
     def build_output(self) -> str:
         if not self.output_template:
             raise ValueError('Sample does not contain output.')
-        return self.output_template.make(
-            dict((k, self.metadata[k]) for k in self.task.features.keys()))
+        return self.output_template.make(self._context())

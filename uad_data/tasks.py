@@ -1,10 +1,10 @@
 """Audio-understanding task definitions.
 
 `Task` enumerates every task the dataset supports and, via `Task.features`, the
-metadata column(s) each task expects. Those column names are what
-`sample.Sample` pulls from a record to render the prompt / instruction / output
-templates, so the keys here must match the fields present in the per-split
-metadata JSONs and the placeholders used in `prompts/*.json`.
+metadata column(s) each task expects. `Task.render_contexts` turns a record into
+the values `sample.Sample` renders the prompt / instruction / output templates
+with, so the keys here must match the fields present in the per-split metadata
+JSONs and the placeholders used in `prompts/*.json`.
 """
 import datasets
 import enum
@@ -43,11 +43,12 @@ class Task(enum.Enum):
             }
         elif self == Task.ASR_TIMESTAMP_SEARCH:
             return {
-                'transcriptions': {
+                # List of timed segments; each one renders as its own row.
+                'transcriptions': [{
                     "start_time": datasets.Value("float"),
                     "end_time": datasets.Value("float"),
                     "transcription": datasets.Value("string")
-                }
+                }]
             }
         elif self == Task.ASR:
             return {'transcription': datasets.Value('string')}
@@ -80,6 +81,23 @@ class Task(enum.Enum):
         else:
             raise NotImplementedError(
                 f'{self.value} prompt handling not yet implemented.')
+
+    def render_contexts(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        """The template contexts one clip's metadata record renders into, one row each.
+
+        Most tasks render a clip once, from the record's values for `features`.
+        asr_timestamp_search renders each segment in the record's `transcriptions`
+        separately, from that segment's own fields, so a record-level key of the
+        same name (libricss_subseg's `start_time`) never leaks into the template.
+        A missing key raises KeyError rather than rendering as a blank.
+        """
+        if self == Task.ASR_TIMESTAMP_SEARCH:
+            segment_keys = self.features['transcriptions'][0].keys()
+            return [
+                {k: segment[k] for k in segment_keys}
+                for segment in record['transcriptions']
+            ]
+        return [{k: record[k] for k in self.features}]
 
     def __lt__(self, other):
         return self.value < other.value
