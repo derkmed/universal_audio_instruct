@@ -46,12 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Override the default HuggingFace model path/id")
 
     p.add_argument("--dataset", default="AudioInstruct/Universal-Audio-Understanding")
-    p.add_argument("--split", default="train", dest="dataset_split")
+    p.add_argument("--split", default=None, dest="dataset_split",
+                   help="Splits to load: one name, several joined with '+', or 'all' "
+                        "(default: all for a smoke run, train otherwise)")
     p.add_argument("--json-config", default="configs/clotho_config.json",
                    dest="json_config_path",
                    help="UAD dataset JSON config (default: configs/clotho_config.json)")
     p.add_argument("--clips-per-split", type=int, default=None, dest="clips_per_split",
                    help="Train on only the first N clips of each selected split (for smoke runs)")
+    p.add_argument("--seed", type=int, default=42, dest="seed",
+                   help="Seeds the Trainer and the prompt-template picks")
 
     p.add_argument("--output-dir", default="outputs/finetune", dest="output_dir")
     p.add_argument("--epochs", type=float, default=1.0, dest="num_train_epochs")
@@ -83,6 +87,7 @@ def main() -> None:
         dataset_split=args.dataset_split,
         json_config_path=args.json_config_path,
         clips_per_split=args.clips_per_split,
+        seed=args.seed,
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -102,10 +107,18 @@ def main() -> None:
         repo_id=config.dataset_name,
         token=hf_token,
         clips_per_split=config.clips_per_split,
+        seed=config.seed,
     )
     print(f"Dataset loaded: {len(rows)} rows")
+    report = rows.report
+    print(report.describe())
     if not rows:
         raise SystemExit("No rows produced — check the config/split.")
+
+    smoke_run = config.clips_per_split is not None
+    if not smoke_run and any(split.split == "test" for split in report.splits):
+        print("\n*** WARNING: the selected splits include test. Training on the "
+              "test split invalidates every evaluation on it. ***\n")
 
     backend_cls = {"GEMMA-4": GemmaTrainBackend, "QWEN3-Omni": QwenTrainBackend}[
         config.model_choice]
@@ -143,6 +156,13 @@ def main() -> None:
     trainer.save_model(config.output_dir)          # LoRA adapter (or full weights)
     backend.processor.save_pretrained(config.output_dir)
     print(f"Saved model + processor to {config.output_dir}/")
+
+    # A smoke run is a check, so its exit status reports what the load found:
+    # a failed internal dataset, a row that wouldn't render, or an empty split.
+    if smoke_run and report.has_problems:
+        raise SystemExit(
+            "Smoke run finished with problems in the load report:\n"
+            + report.describe())
 
 
 if __name__ == "__main__":

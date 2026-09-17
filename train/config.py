@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Same model registry as eval so --model means the same thing in both harnesses.
-from eval.config import DEFAULT_MODEL_PATHS
+from eval.config import DEFAULT_MODEL_PATHS, resolve_dataset_split
 
 
 @dataclass
@@ -20,7 +20,8 @@ class TrainConfig:
 
     # Dataset
     dataset_name: str = "AudioInstruct/Universal-Audio-Understanding"  # HF Hub repo_id
-    dataset_split: str = "train"
+    # See EvalConfig.dataset_split. Unset resolves in __post_init__.
+    dataset_split: Optional[str] = None
     json_config_path: str = "configs/clotho_config.json"
     clips_per_split: Optional[int] = None  # first N clips of each selected split; None = every clip
 
@@ -57,12 +58,14 @@ class TrainConfig:
     logging_steps: int = 10
     save_steps: int = 200
     gradient_checkpointing: bool = True
-    seed: int = 42
+    seed: int = 42  # seeds the Trainer and the loader's prompt-template picks
 
     # Auth
     hf_token: Optional[str] = None
 
     def __post_init__(self):
+        self.dataset_split = resolve_dataset_split(
+            self.dataset_split, clips_per_split=self.clips_per_split, uncapped_default="train")
         if self.load_in_4bit and not self.use_lora:
             raise ValueError(
                 "load_in_4bit without use_lora is not supported: a 4-bit quantized "
