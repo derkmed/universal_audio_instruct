@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
                    dest="json_config_path",
                    help="UAD dataset JSON config (default: configs/clotho_config.json)")
     p.add_argument("--max-samples", type=int, default=None, dest="max_samples",
-                   help="Train on only the first N rows (useful for smoke tests)")
+                   help="Train on only the first N clips of each selected split (useful for smoke tests)")
 
     p.add_argument("--output-dir", default="outputs/finetune", dest="output_dir")
     p.add_argument("--epochs", type=float, default=1.0, dest="num_train_epochs")
