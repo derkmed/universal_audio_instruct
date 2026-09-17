@@ -48,7 +48,7 @@ def test_an_unscored_task_has_no_metric() -> None:
     """Only the six tasks complete-1..5 use are scored; the rest report nothing."""
     assert metrics.metric_name("sentiment_analysis") is None
     assert metrics.answer_field("sentiment_analysis") is None
-    assert metrics.score(_row("sentiment_analysis", Sentiment="happy"), "happy") is None
+    assert metrics.metric_value(_row("sentiment_analysis", Sentiment="happy"), "happy") is None
     assert metrics.aggregate("sentiment_analysis", [(_row("sentiment_analysis"), "x")]) is None
 
     print("PASS: a task outside the metric table has no metric.")
@@ -59,7 +59,7 @@ def test_the_answer_is_read_from_the_plain_field_not_the_rendered_output() -> No
     row["output"] = "The transcription is: hello world."
 
     assert metrics.answer_of(row) == "hello world"
-    assert metrics.score(row, "hello world") == 0.0
+    assert metrics.metric_value(row, "hello world") == 0.0
 
     print("PASS: metrics score against the plain answer field.")
 
@@ -73,9 +73,9 @@ def test_wer_tasks_score_word_error_rate() -> None:
                         ("english_translation", "english_translation"),
                         ("caption", "caption")):
         exact = _row(task, **{field: "a dog barks loudly"})
-        assert metrics.score(exact, "a dog barks loudly") == 0.0, task
+        assert metrics.metric_value(exact, "a dog barks loudly") == 0.0, task
         # One substitution out of four words.
-        assert metrics.score(exact, "a cat barks loudly") == 0.25, task
+        assert metrics.metric_value(exact, "a cat barks loudly") == 0.25, task
 
     print("PASS: asr, english_translation and caption score WER.")
 
@@ -84,16 +84,16 @@ def test_an_empty_prediction_is_a_whole_wer() -> None:
     """An empty prediction is a real miss: every reference word is a deletion."""
     row = _row("asr", transcription="a dog barks loudly")
 
-    assert metrics.score(row, "") == 1.0
-    assert metrics.score(row, "   ") == 1.0
+    assert metrics.metric_value(row, "") == 1.0
+    assert metrics.metric_value(row, "   ") == 1.0
 
     print("PASS: an empty prediction scores WER 1.0.")
 
 
 def test_a_blank_reference_has_no_wer() -> None:
     """WER is undefined with nothing to compare against, so the row scores null."""
-    assert metrics.score(_row("asr", transcription="   "), "anything") is None
-    assert metrics.score(_row("asr"), "anything") is None
+    assert metrics.metric_value(_row("asr", transcription="   "), "anything") is None
+    assert metrics.metric_value(_row("asr"), "anything") is None
 
     print("PASS: a blank reference gives no WER.")
 
@@ -105,12 +105,12 @@ def test_a_blank_reference_has_no_wer() -> None:
 def test_classification_hits_when_the_category_appears() -> None:
     row = _row("classification", category="car_horn")
 
-    assert metrics.score(row, "I hear a car horn.") == 1.0
+    assert metrics.metric_value(row, "I hear a car horn.") == 1.0
     # Case and punctuation are ignored, and `_` reads as a space.
-    assert metrics.score(row, "CAR HORN!") == 1.0
-    assert metrics.score(row, "car_horn") == 1.0
-    assert metrics.score(row, "a dog barking") == 0.0
-    assert metrics.score(row, "") == 0.0
+    assert metrics.metric_value(row, "CAR HORN!") == 1.0
+    assert metrics.metric_value(row, "car_horn") == 1.0
+    assert metrics.metric_value(row, "a dog barking") == 0.0
+    assert metrics.metric_value(row, "") == 0.0
 
     print("PASS: classification hits on the category appearing in the prediction.")
 
@@ -118,47 +118,67 @@ def test_classification_hits_when_the_category_appears() -> None:
 def test_commonsense_hits_on_the_answers_choice_letter() -> None:
     row = _row("commonsense", commonsense_answer="B. the kettle is boiling")
 
-    assert metrics.score(row, "B. the kettle is boiling") == 1.0
-    assert metrics.score(row, "b") == 1.0
+    assert metrics.metric_value(row, "B. the kettle is boiling") == 1.0
+    assert metrics.metric_value(row, "b") == 1.0
     # Leading punctuation and whitespace don't hide the letter.
-    assert metrics.score(row, "  (B) the kettle") == 1.0
-    assert metrics.score(row, "A. the door closed") == 0.0
+    assert metrics.metric_value(row, "  (B) the kettle") == 1.0
+    assert metrics.metric_value(row, "A. the door closed") == 0.0
     # Naming the answer's words without its letter is not a hit.
-    assert metrics.score(row, "the kettle is boiling") == 0.0
-    assert metrics.score(row, "") == 0.0
+    assert metrics.metric_value(row, "the kettle is boiling") == 0.0
+    assert metrics.metric_value(row, "") == 0.0
 
     print("PASS: commonsense hits on the prediction starting with the choice letter.")
 
 
 def test_commonsense_without_a_choice_letter_never_hits() -> None:
     """There is no letter to start with, so nothing can match it."""
-    assert metrics.score(_row("commonsense", commonsense_answer="boiling"), "boiling") == 0.0
+    assert metrics.metric_value(_row("commonsense", commonsense_answer="boiling"), "boiling") == 0.0
 
     print("PASS: a commonsense answer with no choice letter cannot be hit.")
+
+
+def test_a_prediction_opening_with_prose_is_not_a_choice_letter() -> None:
+    """Otherwise every prose answer starting "A ..." or "I ..." hits choice A or I."""
+    row = _row("commonsense", commonsense_answer="A. the kettle is boiling")
+
+    assert metrics.metric_value(row, "A person is clapping their hands.") == 0.0
+    assert metrics.metric_value(row, "I think so.") == 0.0
+    # A letter with a marker after it, or standing alone, is still a choice.
+    assert metrics.metric_value(row, "A. the kettle is boiling") == 1.0
+    assert metrics.metric_value(row, "(a)") == 1.0
+    assert metrics.metric_value(row, "A") == 1.0
+
+    print("PASS: a prose prediction is not read as a choice letter.")
 
 
 def test_qa_hits_when_every_number_in_the_answer_appears() -> None:
     row = _row("qa", answer="The result is 102.")
 
-    assert metrics.score(row, "I think the result is 102.") == 1.0
-    assert metrics.score(row, "102") == 1.0
-    assert metrics.score(row, "The result is 12.") == 0.0
+    assert metrics.metric_value(row, "I think the result is 102.") == 1.0
+    assert metrics.metric_value(row, "102") == 1.0
+    assert metrics.metric_value(row, "The result is 12.") == 0.0
     # A longer number that merely contains the digits is not the same number.
-    assert metrics.score(row, "The result is 1020.") == 0.0
-    assert metrics.score(row, "") == 0.0
+    assert metrics.metric_value(row, "The result is 1020.") == 0.0
+    assert metrics.metric_value(row, "") == 0.0
 
     two = _row("qa", answer="Between 3 and 7 seconds.")
-    assert metrics.score(two, "about 3 to 7 seconds") == 1.0
-    assert metrics.score(two, "about 3 seconds") == 0.0
+    assert metrics.metric_value(two, "about 3 to 7 seconds") == 1.0
+    assert metrics.metric_value(two, "about 3 seconds") == 0.0
 
     print("PASS: qa hits when every number in the answer appears in the prediction.")
 
 
-def test_a_qa_answer_with_no_numbers_hits_vacuously() -> None:
-    """The decided rule is 'every number appears'; with no numbers, none are missing."""
-    assert metrics.score(_row("qa", answer="Yes."), "No.") == 1.0
+def test_a_qa_answer_with_no_numbers_hits_only_on_a_real_prediction() -> None:
+    """The rule is 'every number appears'; with no numbers, none can be missing.
 
-    print("PASS: a numberless qa answer hits vacuously, as the rule reads.")
+    An empty prediction is still a real miss, whatever the answer holds, so the
+    vacuous hit never turns an `empty_output` row into a hit.
+    """
+    assert metrics.metric_value(_row("qa", answer="Yes."), "No.") == 1.0
+    assert metrics.metric_value(_row("qa", answer="Yes."), "") == 0.0
+    assert metrics.metric_value(_row("qa", answer="Yes."), "   ") == 0.0
+
+    print("PASS: a numberless qa answer hits, but never on an empty prediction.")
 
 
 # ----------------------------------------------------------------------
@@ -167,34 +187,34 @@ def test_a_qa_answer_with_no_numbers_hits_vacuously() -> None:
 
 def test_wer_groups_aggregate_at_corpus_level_not_as_a_mean() -> None:
     """One long row and one short row: corpus WER weights by reference length."""
-    scored = [
+    predicted = [
         (_row("asr", transcription="one two three four"), "one two three four"),
         (_row("asr", transcription="five"), "six"),
     ]
     # Per-row WERs are 0.0 and 1.0, whose mean is 0.5. Corpus WER is 1 error
     # over 5 reference words.
-    assert metrics.aggregate("asr", scored) == 0.2
+    assert metrics.aggregate("asr", predicted) == 0.2
 
     print("PASS: a WER group aggregates over the rows at corpus level.")
 
 
 def test_an_empty_prediction_counts_against_a_wer_group() -> None:
-    scored = [
+    predicted = [
         (_row("asr", transcription="one two"), "one two"),
         (_row("asr", transcription="three four"), ""),
     ]
-    assert metrics.aggregate("asr", scored) == 0.5
+    assert metrics.aggregate("asr", predicted) == 0.5
 
     print("PASS: an empty prediction is a miss in a WER group.")
 
 
 def test_hit_rate_groups_aggregate_as_a_mean() -> None:
-    scored = [
+    predicted = [
         (_row("classification", category="dog"), "a dog"),
         (_row("classification", category="cat"), "a dog"),
         (_row("classification", category="cow"), ""),
     ]
-    assert metrics.aggregate("classification", scored) == 1 / 3
+    assert metrics.aggregate("classification", predicted) == 1 / 3
 
     print("PASS: a hit-rate group is the mean of its rows' hits.")
 
@@ -202,10 +222,26 @@ def test_hit_rate_groups_aggregate_as_a_mean() -> None:
 def test_a_group_with_no_scorable_rows_has_no_value() -> None:
     assert metrics.aggregate("asr", []) is None
     assert metrics.aggregate("classification", []) is None
-    # Rows whose reference is blank leave a WER group with nothing to compare.
+    # Every reference blank leaves corpus WER with no words to divide by.
     assert metrics.aggregate("asr", [(_row("asr", transcription=""), "hello")]) is None
 
     print("PASS: a group with no scorable rows reports null.")
+
+
+def test_a_blank_reference_still_counts_its_row_in_a_wer_group() -> None:
+    """The group is one corpus WER over every row with a prediction, not a subset.
+
+    A row with a blank reference has no WER of its own, but the words the model
+    invented for it are still insertions against the group's references.
+    """
+    predicted = [
+        (_row("asr", transcription="one two"), "one two"),
+        (_row("asr", transcription=""), "three four"),
+    ]
+    # Two insertions over two reference words.
+    assert metrics.aggregate("asr", predicted) == 1.0
+
+    print("PASS: a blank-reference row still counts in its WER group.")
 
 
 if __name__ == "__main__":

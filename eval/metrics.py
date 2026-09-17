@@ -18,7 +18,7 @@ numbers.
 Those six are every task the `complete-1..5` run configs use. Any other task has
 no metric, and reports `None` throughout.
 
-`score` gives one row's value; `aggregate` gives a group's. A WER group is
+`metric_value` gives one row's value; `aggregate` gives a group's. A WER group is
 corpus-level -- one `wer.compute` over every row -- not the mean of the rows'
 own WERs, so a long reference weighs more than a short one. A hit-rate group is
 the mean of its rows' hits.
@@ -45,10 +45,13 @@ _METRICS: dict[str, tuple[str, str]] = {
 
 _PUNCTUATION = str.maketrans({c: " " for c in string.punctuation})
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
-# A leading multiple-choice letter: one letter, before any word character, with
-# nothing but punctuation or whitespace ahead of it. "B. ..." and "(b)" match;
-# "boiling" does not, because its "b" runs straight into another letter.
-_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])(?!\w)")
+# A leading multiple-choice letter: one letter, with nothing but punctuation or
+# whitespace ahead of it, and a choice marker or the end of the text after it.
+# "B. ...", "(b)" and a bare "B" match. "boiling" does not, because its "b" runs
+# into another letter -- and neither does "A person is clapping", because a
+# letter followed by a space is prose, not a choice. Reading that as choice A
+# would hand a free hit to every prose prediction opening with "A " or "I ".
+_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])\s*(?:[^\w\s]|$)")
 
 # Loaded lazily and kept: `evaluate.load` reads from disk on every call.
 _wer_metric = None
@@ -72,11 +75,12 @@ def answer_of(row: dict) -> str:
     return "" if field is None else str(row.get(field) or "")
 
 
-def score(row: dict, prediction: str) -> Optional[float]:
+def metric_value(row: dict, prediction: str) -> Optional[float]:
     """One row's metric value: its WER, or 1.0/0.0 for a hit-rate task.
 
     None when the task has no metric, or when a WER row has no reference words
-    to compare against (an empty transcription), which leaves WER undefined.
+    of its own (an empty transcription), which leaves that row's WER undefined.
+    The row still counts in its group -- see `aggregate`.
     """
     task = row.get("task", "")
     name = metric_name(task)
@@ -92,32 +96,33 @@ def score(row: dict, prediction: str) -> Optional[float]:
     return float(_hits(task, answer, prediction))
 
 
-def aggregate(task: str, scored: Iterable[tuple[dict, str]]) -> Optional[float]:
+def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[float]:
     """One group's metric value over its `(row, prediction)` pairs.
 
-    Pass only the rows that have a prediction -- `ok` and `empty_output`. A row
-    that never reached the model has no prediction to score and already fails its
-    group. None when the task has no metric, or when no pair is scorable.
+    Pass every row that has a prediction -- `ok` and `empty_output` -- and no
+    others: a row that never reached the model has nothing to compare and
+    already fails its group. Which rows count is decided by status alone, so a
+    row whose own reference is blank still contributes the words the model
+    invented for it.
+
+    None when the task has no metric, when there are no pairs, or when a WER
+    group's references are all blank, leaving no words to divide by.
     """
     name = metric_name(task)
     if name is None:
         return None
 
-    pairs = list(scored)
-    if name == WER:
-        references, predictions = [], []
-        for row, prediction in pairs:
-            reference = answer_of(row).strip()
-            if not reference:  # nothing to compare against; see `score`
-                continue
-            references.append(reference)
-            predictions.append(prediction)
-        if not references:
-            return None
-        return _wer(predictions=predictions, references=references)
-
+    pairs = list(predicted)
     if not pairs:
         return None
+
+    if name == WER:
+        references = [answer_of(row).strip() for row, _ in pairs]
+        if not any(references):
+            return None
+        return _wer(
+            predictions=[prediction for _, prediction in pairs], references=references)
+
     hits = [_hits(task, answer_of(row), prediction) for row, prediction in pairs]
     return sum(hits) / len(hits)
 
@@ -136,6 +141,12 @@ def _wer(*, predictions: list[str], references: list[str]) -> float:
 
 def _hits(task: str, answer: str, prediction: str) -> float:
     """Whether one hit-rate row's prediction counts as a hit (1.0) or a miss (0.0)."""
+    # An empty prediction is a real miss, whatever the answer holds. Checked here
+    # rather than per rule, because `qa`'s rule would otherwise hit vacuously on
+    # an answer with no numbers in it.
+    if not prediction.strip():
+        return 0.0
+
     if task == "classification":
         # The category appears in the prediction, ignoring case and punctuation
         # and reading `_` as a space, so "car_horn" matches "I hear a car horn.".
