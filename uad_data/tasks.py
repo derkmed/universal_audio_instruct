@@ -1,10 +1,10 @@
 """Audio-understanding task definitions.
 
 `Task` enumerates every task the dataset supports and, via `Task.features`, the
-metadata column(s) each task expects. `Task.render_contexts` turns a record into
-the values `sample.Sample` renders the prompt / instruction / output templates
-with, so the keys here must match the fields present in the per-split metadata
-JSONs and the placeholders used in `prompts/*.json`.
+metadata column(s) each task expects. `Task.render_context` reads those fields
+from a record for `sample.Sample` to render the prompt / instruction / output
+templates with, so the keys here must match the fields present in the per-split
+metadata JSONs and the placeholders used in `prompts/*.json`.
 """
 import datasets
 import enum
@@ -43,7 +43,7 @@ class Task(enum.Enum):
             }
         elif self == Task.ASR_TIMESTAMP_SEARCH:
             return {
-                # List of timed segments; each one renders as its own row.
+                # List of utterances; each one renders as its own rows.
                 'transcriptions': [{
                     "start_time": datasets.Value("float"),
                     "end_time": datasets.Value("float"),
@@ -82,22 +82,53 @@ class Task(enum.Enum):
             raise NotImplementedError(
                 f'{self.value} prompt handling not yet implemented.')
 
-    def render_contexts(self, record: dict[str, Any]) -> list[dict[str, Any]]:
-        """The template contexts one clip's metadata record renders into, one row each.
+    def utterance_indices(self, record: dict[str, Any]) -> list[int | None]:
+        """Which utterances of a clip's metadata record render as separate rows.
 
-        Most tasks render a clip once, from the record's values for `features`.
-        asr_timestamp_search renders each segment in the record's `transcriptions`
-        separately, from that segment's own fields, so a record-level key of the
-        same name (libricss_subseg's `start_time`) never leaks into the template.
-        A missing key raises KeyError rather than rendering as a blank.
+        asr_timestamp_search renders each utterance in the record's
+        `transcriptions` list as its own rows, so this returns their indices.
+        Every other task renders the whole record once: `[None]`. So does a
+        `transcriptions` that is missing, empty or not a list, which leaves the
+        clip one row that fails in `render_context`.
+
+        Never raises: bad metadata is reported when a row renders, after the
+        sample filter has decided whether that row is wanted at all.
         """
         if self == Task.ASR_TIMESTAMP_SEARCH:
-            segment_keys = self.features['transcriptions'][0].keys()
-            return [
-                {k: segment[k] for k in segment_keys}
-                for segment in record['transcriptions']
-            ]
-        return [{k: record[k] for k in self.features}]
+            utterances = record.get('transcriptions')
+            if isinstance(utterances, list) and utterances:
+                return list(range(len(utterances)))
+        return [None]
+
+    def render_context(
+            self, record: dict[str, Any], utterance_index: int | None = None) -> dict[str, Any]:
+        """The values one row's templates render with.
+
+        Most tasks read the record's `features` fields. asr_timestamp_search reads
+        the fields of the utterance at `utterance_index` instead, so a record-level
+        key of the same name (libricss_subseg's `start_time`) never leaks into the
+        template. A missing field raises KeyError naming the clip, rather than
+        rendering as a blank.
+        """
+        where = f'{self.value} row for {record.get("audio_path")!r}'
+        source, keys = record, self.features.keys()
+        if self == Task.ASR_TIMESTAMP_SEARCH:
+            utterances = record.get('transcriptions')
+            if not isinstance(utterances, list) or not utterances:
+                raise ValueError(
+                    f'{where}: `transcriptions` must be a non-empty list of utterances, '
+                    f'got {utterances!r:.80}')
+            if utterance_index is None:
+                raise ValueError(f'{where}: pass the index of the utterance to render.')
+            where += f' (utterance {utterance_index})'
+            source = utterances[utterance_index]
+            keys = self.features['transcriptions'][0].keys()
+            if not isinstance(source, dict):
+                raise ValueError(f'{where}: expected an object, got {source!r:.80}')
+        missing = [k for k in keys if k not in source]
+        if missing:
+            raise KeyError(f'{where} has no {", ".join(map(repr, missing))}')
+        return {k: source[k] for k in keys}
 
     def __lt__(self, other):
         return self.value < other.value

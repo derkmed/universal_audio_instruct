@@ -1,11 +1,13 @@
-"""Offline test: asr_timestamp_search renders one row per segment of a clip.
+"""Offline test: asr_timestamp_search renders one row per utterance of a clip.
 
-The task's metadata gives each clip a `transcriptions` list of timed segments
+The task's metadata gives each clip a `transcriptions` list of utterances
 (`start_time`, `end_time`, `transcription`), while its prompt templates ask about a
 single span. Builds a synthetic archive + metadata + prompt file (a copy of the
 Hub's `prompts/asr_timestamp_search.json`), temporarily swaps the Hub download
 functions for fakes so nothing touches the network (restoring them afterwards),
-and asserts every segment is rendered with every template.
+and asserts every utterance is rendered with every template -- or, with random
+templates, with its own pick -- and that bad metadata fails only the rows that
+render it.
 
 Runnable directly (`python tests/test_asr_timestamp_search.py`) or under pytest.
 Only requires `datasets`, `jinja2`, `huggingface_hub`.
@@ -21,7 +23,7 @@ import tempfile
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from uad_data import hub, loader  # noqa: E402
+from uad_data import filters, hub, loader  # noqa: E402
 
 # Hub prompts/asr_timestamp_search.json at c4e1b16: 2 system instructions x 2 outputs.
 TIMESTAMP_PROMPT = {
@@ -36,7 +38,8 @@ TIMESTAMP_PROMPT = {
     ],
 }
 
-# Shaped like the Hub's libricss_test.json.
+# Shaped like the Hub's libricss_test.json. LibriCSS's own `segment` field numbers
+# the clip within its recording session; it has nothing to do with utterances.
 LIBRICSS_METADATA = [
     {
         "session": 7, "segment": 8, "overlap_ratio": 40.0,
@@ -56,8 +59,8 @@ LIBRICSS_METADATA = [
 ]
 
 # Shaped like the Hub's libricss_subseg_test.json: the record's own start_time /
-# end_time are the sub-clip's window in the original segment, while the segment
-# times are relative to the sub-clip's audio.
+# end_time give the sub-clip's window within the libricss clip it was cut from
+# (`original_audio_path`), while its utterances' times are relative to the sub-clip.
 SUBSEG_METADATA = [
     {
         "start_time": 28.25, "end_time": 30.34,
@@ -70,19 +73,42 @@ SUBSEG_METADATA = [
     },
 ]
 
-# Shaped like the Hub's SparseLibriMix_test.json before Hub commit e80eab1, when
-# its segments said start / end rather than start_time / end_time.
-START_END_METADATA = [
+# One clip with many utterances, so that utterances sharing one random template
+# would show up (see test_random_templates_are_picked_per_utterance).
+MANY_UTTERANCES_METADATA = [
     {
-        "transcriptions": [
-            {"start": 0.246, "end": 3.826, "transcription": "THAT IS WHY WE CRY"},
-        ],
         "audio_path": "sparse_2_0.6/wav/mix_clean/mix_0000001.wav",
+        "transcriptions": [
+            {"start_time": float(i), "end_time": i + 0.5, "transcription": f"WORD {i}"}
+            for i in range(40)
+        ],
+    },
+]
+
+# The second utterance is shaped like SparseLibriMix's before Hub commit e80eab1,
+# when its utterances said start / end rather than start_time / end_time.
+BAD_UTTERANCE_METADATA = [
+    {
+        "audio_path": "sparse_2_0.6/wav/mix_clean/mix_0000002.wav",
+        "transcriptions": [
+            {"start_time": 0.281, "end_time": 3.421, "transcription": "I'LL JUST LOOK"},
+            {"start": 1.537, "end": 4.317, "transcription": "MORNIN GIRLS"},
+        ],
     },
 ]
 
 
-def _build_fixture(root: str, name: str, metadata: list[dict]) -> dict:
+class RejectAll(filters.SampleFilter):
+    def include_sample(self, sample) -> bool:
+        return False
+
+
+class FirstUtteranceOnly(filters.SampleFilter):
+    def include_sample(self, sample) -> bool:
+        return sample.utterance_index == 0
+
+
+def _build_fixture(root: str, name: str, metadata: list[dict], **config) -> dict:
     prompts_dir = os.path.join(root, "prompts")
     os.makedirs(prompts_dir)
     with open(os.path.join(prompts_dir, "asr_timestamp_search.json"), "w", encoding="utf-8") as f:
@@ -105,6 +131,7 @@ def _build_fixture(root: str, name: str, metadata: list[dict]) -> dict:
         json.dump({
             "name": f"{name} timestamp search test",
             "datasets": [{"name": name, "splits": ["test"], "tasks": ["asr_timestamp_search"]}],
+            **config,
         }, f)
 
     return {
@@ -152,10 +179,22 @@ def _patched_hub(**fakes):
             setattr(hub, name, original)
 
 
-def _load_rows(name: str, metadata: list[dict]) -> list[dict]:
+@contextlib.contextmanager
+def _registered_filters(**classes):
+    """Make extra filters selectable by name in a run config's sample_filter."""
+    filters.FILTER_REGISTRY.update(classes)
+    try:
+        yield
+    finally:
+        for name in classes:
+            del filters.FILTER_REGISTRY[name]
+
+
+def _load_rows(name: str, metadata: list[dict], **config) -> list[dict]:
     with tempfile.TemporaryDirectory() as root:
-        fx = _build_fixture(root, name, metadata)
-        with _patched_hub(**_fake_hub(fx)):
+        fx = _build_fixture(root, name, metadata, **config)
+        with _patched_hub(**_fake_hub(fx)), _registered_filters(
+                reject_all=RejectAll, first_utterance_only=FirstUtteranceOnly):
             return loader.load_uad_dataset(
                 json_config_path=fx["config_path"],
                 split="test",
@@ -163,9 +202,17 @@ def _load_rows(name: str, metadata: list[dict]) -> list[dict]:
             )
 
 
-def _expected_texts(segment: dict) -> set[tuple[str, str]]:
-    """Every (system_instruction, output) pair the prompt file gives one segment."""
-    start, end, text = segment["start_time"], segment["end_time"], segment["transcription"]
+def _load_error(name: str, metadata: list[dict], **config) -> Exception:
+    try:
+        rows = _load_rows(name, metadata, **config)
+    except Exception as e:
+        return e
+    raise AssertionError(f"expected an error, got {len(rows)} rows")
+
+
+def _expected_texts(utterance: dict) -> set[tuple[str, str]]:
+    """Every (system_instruction, output) pair the prompt file gives one utterance."""
+    start, end, text = utterance["start_time"], utterance["end_time"], utterance["transcription"]
     instructions = [
         f"You are given an audio file. Can you please transcribe between {start} and {end}?",
         f"Tell me what is said between {start} and {end} in the provided audio.",
@@ -174,27 +221,35 @@ def _expected_texts(segment: dict) -> set[tuple[str, str]]:
     return {(si, o) for si in instructions for o in outputs}
 
 
-def test_one_row_per_segment_and_template() -> None:
+def _renders_own_utterance(row: dict) -> bool:
+    utterance = row["transcriptions"][row["utterance_index"]]
+    return (row["system_instruction"], row["output"]) in _expected_texts(utterance)
+
+
+def test_one_row_per_utterance_and_template() -> None:
     rows = _load_rows("libricss", LIBRICSS_METADATA)
 
-    # 3 segments x (2 system instructions x 2 outputs) = 12 rows.
+    # 3 utterances x (2 system instructions x 2 outputs) = 12 rows.
     assert len(rows) == 12, f"expected 12 rows, got {len(rows)}"
 
     for record in LIBRICSS_METADATA:
         clip_rows = [r for r in rows if r["audio_path"] == record["audio_path"]]
         got = sorted((r["system_instruction"], r["output"]) for r in clip_rows)
-        want = sorted(set().union(*(_expected_texts(s) for s in record["transcriptions"])))
+        want = sorted(set().union(*(_expected_texts(u) for u in record["transcriptions"])))
         assert got == want, f"{record['audio_path']}: got {got}"
+        indices = sorted(r["utterance_index"] for r in clip_rows)
+        assert indices == sorted(list(range(len(record["transcriptions"]))) * 4), indices
         for r in clip_rows:
+            assert _renders_own_utterance(r), r
             assert r["task"] == "asr_timestamp_search", r["task"]
             assert r["originating_dataset"] == "libricss", r["originating_dataset"]
             assert r["prompt"] == "", r["prompt"]
             assert r["transcriptions"] == record["transcriptions"]
 
-    print("PASS: libricss-shaped clips render one row per segment and template.")
+    print("PASS: libricss-shaped clips render one row per utterance and template.")
 
 
-def test_segment_times_win_over_record_times() -> None:
+def test_utterance_times_win_over_record_times() -> None:
     rows = _load_rows("libricss_subseg", SUBSEG_METADATA)
 
     assert len(rows) == 4, f"expected 4 rows, got {len(rows)}"
@@ -203,21 +258,69 @@ def test_segment_times_win_over_record_times() -> None:
     # The row still carries the record's own window, untouched.
     assert all((r["start_time"], r["end_time"]) == (28.25, 30.34) for r in rows)
 
-    print("PASS: libricss_subseg-shaped clips render the segment's times, not the window's.")
+    print("PASS: libricss_subseg-shaped clips render the utterance's times, not the window's.")
 
 
-def test_segment_missing_start_time_raises() -> None:
-    try:
-        rows = _load_rows("SparseLibriMix", START_END_METADATA)
-    except KeyError as e:
-        assert "start_time" in str(e), e
-    else:
-        raise AssertionError(f"expected KeyError, got rows: {rows}")
+def test_random_templates_are_picked_per_utterance() -> None:
+    rows = _load_rows(
+        "SparseLibriMix", MANY_UTTERANCES_METADATA, randomize_prompt_format=True)
 
-    print("PASS: a segment without start_time fails instead of rendering blanks.")
+    # One row per utterance, each rendering its own utterance.
+    assert sorted(r["utterance_index"] for r in rows) == list(range(40)), rows
+    assert all(_renders_own_utterance(r) for r in rows), rows
+
+    # Each utterance picks its own template. If the whole clip shared one pick,
+    # all 40 rows would use the same (instruction, output) pair. Independent picks
+    # from 4 pairs all match with probability 4 * (1/4)**40, about 3e-24.
+    pairs = {
+        (r["system_instruction"].startswith("You are given"), r["output"].startswith("Of course"))
+        for r in rows
+    }
+    assert len(pairs) > 1, f"all 40 utterances got the same template: {pairs}"
+
+    print("PASS: random templates are picked separately for each utterance.")
+
+
+def test_bad_utterance_fails_only_its_own_rows() -> None:
+    # Filtered out, the bad utterance never renders, so nothing raises.
+    rows = _load_rows(
+        "SparseLibriMix", BAD_UTTERANCE_METADATA, sample_filter="first_utterance_only")
+    assert len(rows) == 4, f"expected 4 rows, got {len(rows)}"
+    assert all(r["utterance_index"] == 0 and _renders_own_utterance(r) for r in rows), rows
+
+    # Rendered, it raises instead of rendering blanks, and says where it is.
+    e = _load_error("SparseLibriMix", BAD_UTTERANCE_METADATA)
+    assert isinstance(e, KeyError), repr(e)
+    for part in ("start_time", "end_time", "mix_0000002.wav", "utterance 1"):
+        assert part in str(e), f"{part!r} not in {e}"
+
+    print("PASS: an utterance without start_time fails only when its rows render.")
+
+
+def test_unusable_transcriptions_fail_only_when_rendered() -> None:
+    cases = {
+        "missing": {},
+        "empty": {"transcriptions": []},
+        # The shape Task.features used to declare.
+        "dict": {"transcriptions": {"start_time": 0.0, "end_time": 1.0, "transcription": "HI"}},
+    }
+    for case, fields in cases.items():
+        metadata = [{"audio_path": f"clips/{case}.wav", **fields}]
+
+        rows = _load_rows("libricss", metadata, sample_filter="reject_all")
+        assert rows == [], f"{case}: {rows}"
+
+        e = _load_error("libricss", metadata)
+        assert isinstance(e, ValueError), f"{case}: {e!r}"
+        for part in ("transcriptions", f"clips/{case}.wav"):
+            assert part in str(e), f"{case}: {part!r} not in {e}"
+
+    print("PASS: a missing, empty or non-list transcriptions fails only when its row renders.")
 
 
 if __name__ == "__main__":
-    test_one_row_per_segment_and_template()
-    test_segment_times_win_over_record_times()
-    test_segment_missing_start_time_raises()
+    test_one_row_per_utterance_and_template()
+    test_utterance_times_win_over_record_times()
+    test_random_templates_are_picked_per_utterance()
+    test_bad_utterance_fails_only_its_own_rows()
+    test_unusable_transcriptions_fail_only_when_rendered()

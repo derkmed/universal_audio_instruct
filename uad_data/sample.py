@@ -21,9 +21,9 @@ class Sample:
     system_instruction_template: io_templates.SystemInstructionTemplate | None = None
     prompt_template: io_templates.PromptTemplate | None = None
     output_template: io_templates.OutputTemplate | None = None
-    # Values the templates render with: one of `task.render_contexts(metadata)`.
-    # May be left out when the task renders the record as a single row.
-    render_context: dict[str, Any] | None = None
+    # Which utterance in `metadata['transcriptions']` this row renders
+    # (asr_timestamp_search only; see `Task.utterance_indices`).
+    utterance_index: int | None = None
 
     def __post_init__(self):
         if self.system_instruction_template is None and self.prompt_template is None:
@@ -37,10 +37,10 @@ class Sample:
         #
         # A shallow copy of the record is taken so that each generated row is an
         # independent dict. The same `metadata` record is reused across every
-        # (task, prompt-template) expansion of one audio clip; without the copy,
-        # materialising the generator into a list would alias every row to the
-        # last-written state. (The old HF loading script serialised each yield to
-        # Arrow immediately, so aliasing was invisible there.)
+        # (task, utterance, prompt-template) expansion of one audio clip; without
+        # the copy, materialising the generator into a list would alias every row
+        # to the last-written state. (The old HF loading script serialised each
+        # yield to Arrow immediately, so aliasing was invisible there.)
         example = dict(self.metadata)
         example["task"] = self.task.value
         example["split"] = self.split
@@ -49,6 +49,8 @@ class Sample:
             "path": (os.path.join(AUDIO_DATA_BASEPATH, self.dataset_name, self.audio_path)),
             "bytes": self.audio_data
         }
+        if self.utterance_index is not None:
+            example["utterance_index"] = self.utterance_index
         example['system_instruction'] = self.build_system_instruction() if self.system_instruction_template else ''
         example['prompt'] = self.build_prompt() if self.prompt_template else ''
         if self.output_template:
@@ -56,14 +58,7 @@ class Sample:
         return example
 
     def _context(self) -> dict[str, Any]:
-        if self.render_context is not None:
-            return self.render_context
-        contexts = self.task.render_contexts(self.metadata)
-        if len(contexts) != 1:
-            raise ValueError(
-                f'{self.task.value} renders {len(contexts)} rows from {self.audio_path}; '
-                'pass one of them as render_context.')
-        return contexts[0]
+        return self.task.render_context(self.metadata, self.utterance_index)
 
     def build_system_instruction(self) -> str:
         if not self.system_instruction_template:

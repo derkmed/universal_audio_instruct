@@ -20,7 +20,7 @@ import tempfile
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from uad_data import hub, loader  # noqa: E402
+from uad_data import filters, hub, loader  # noqa: E402
 
 # Real caption.json structure: 1 system instruction x 1 prompt x 2 outputs.
 CAPTION_PROMPT = {
@@ -49,7 +49,7 @@ CONFIG = {
 }
 
 
-def _build_fixture(root: str) -> dict:
+def _build_fixture(root: str, metadata: list[dict] = METADATA, config: dict = CONFIG) -> dict:
     prompts_dir = os.path.join(root, "prompts")
     os.makedirs(prompts_dir)
     with open(os.path.join(prompts_dir, "caption.json"), "w", encoding="utf-8") as f:
@@ -57,7 +57,7 @@ def _build_fixture(root: str) -> dict:
 
     metadata_path = os.path.join(root, "Clotho_test.json")
     with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(METADATA, f)
+        json.dump(metadata, f)
 
     tar_path = os.path.join(root, "Clotho.tar.gz")
     with tarfile.open(tar_path, "w:gz") as tar:
@@ -68,7 +68,7 @@ def _build_fixture(root: str) -> dict:
 
     config_path = os.path.join(root, "config.json")
     with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(CONFIG, f)
+        json.dump(config, f)
 
     return {
         "prompts_dir": prompts_dir,
@@ -113,6 +113,22 @@ def _patched_hub(**fakes):
     finally:
         for name, original in originals.items():
             setattr(hub, name, original)
+
+
+class RejectAll(filters.SampleFilter):
+    def include_sample(self, sample) -> bool:
+        return False
+
+
+@contextlib.contextmanager
+def _registered_filters(**classes):
+    """Make extra filters selectable by name in a run config's sample_filter."""
+    filters.FILTER_REGISTRY.update(classes)
+    try:
+        yield
+    finally:
+        for name in classes:
+            del filters.FILTER_REGISTRY[name]
 
 
 def test_load_expands_rows() -> None:
@@ -202,6 +218,32 @@ def test_max_samples_streams_prefix() -> None:
     print("PASS: streaming path honored max_samples and avoided the full archive download.")
 
 
+def test_missing_field_fails_only_when_rendered() -> None:
+    """A record without its task's field raises when its row renders, after the filter."""
+    metadata = [{"audio_path": "test/a.wav"}, METADATA[1]]  # a.wav has no caption
+
+    with tempfile.TemporaryDirectory() as root:
+        fx = _build_fixture(root, metadata, {**CONFIG, "sample_filter": "reject_all"})
+        with _patched_hub(**_fake_hub(fx)), _registered_filters(reject_all=RejectAll):
+            rows = loader.load_uad_dataset(
+                json_config_path=fx["config_path"], split="test", token=None)
+    assert rows == [], rows
+
+    with tempfile.TemporaryDirectory() as root:
+        fx = _build_fixture(root, metadata)
+        with _patched_hub(**_fake_hub(fx)):
+            try:
+                rows = loader.load_uad_dataset(
+                    json_config_path=fx["config_path"], split="test", token=None)
+            except KeyError as e:
+                assert "caption" in str(e) and "test/a.wav" in str(e), e
+            else:
+                raise AssertionError(f"expected KeyError, got {len(rows)} rows")
+
+    print("PASS: a record missing its caption fails only when its row renders.")
+
+
 if __name__ == "__main__":
     test_load_expands_rows()
     test_max_samples_streams_prefix()
+    test_missing_field_fails_only_when_rendered()
