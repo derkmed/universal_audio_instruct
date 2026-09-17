@@ -78,30 +78,20 @@ def test_smoke_run_records_render_failures_and_still_counts_the_clip() -> None:
     print("PASS: a smoke run records and logs a render failure and still counts its clip.")
 
 
-def test_smoke_run_records_a_task_with_no_prompt_templates_as_render_failures() -> None:
+def test_a_task_with_no_prompt_templates_raises_in_every_run() -> None:
+    """A task with no templates is a config problem, so even a smoke run stops."""
     # The fixture has no commonsense prompt templates.
     config = {"name": "Clotho", "datasets": [
         {"name": "Clotho", "tasks": ["caption", "commonsense"], "splits": ["test"]}]}
-    rows, _ = fx._load(fx.CLOTHO, config, split="test", clips_per_split=2)
+    for n in (None, 2):
+        try:
+            rows, _ = fx._load(fx.CLOTHO, config, split="test", clips_per_split=n)
+        except ValueError as e:
+            assert "commonsense" in str(e).lower(), e
+        else:
+            raise AssertionError(f"n={n}: expected ValueError, got {len(rows)} rows")
 
-    assert fx._clips(rows) == [("test", "test/t0.wav"), ("test", "test/t1.wav")], rows
-    assert {r["task"] for r in rows} == {"caption"}, rows
-    assert [(f.task, f.audio_path) for f in rows.report.render_failures] == [
-        ("commonsense", "test/t0.wav"), ("commonsense", "test/t1.wav")
-    ], rows.report.render_failures
-
-    # A clip whose only task can't render still counts: the cap stops the read.
-    config["datasets"][0]["tasks"] = ["commonsense"]
-    rows, _ = fx._load(fx.CLOTHO, config, split="test", clips_per_split=2)
-    assert rows == [], rows
-    assert rows.report.splits[0].clips_found == 2, rows.report.splits
-    assert len(rows.report.render_failures) == 2, rows.report.render_failures
-
-    print("PASS: a task with no prompt templates fails each clip's render, and the clip counts.")
-
-
-def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_templates() -> None:
-    # _RejectClipsFilter drops t0 and t1; the fixture has no commonsense prompt templates.
+    # It is not swallowed as a load failure, whatever the row filter says.
     fx.filters.FILTER_REGISTRY["reject_clips"] = fx._RejectClipsFilter
     try:
         members = [f"test/t{i}.wav" for i in range(4)]
@@ -109,46 +99,17 @@ def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_template
             "members": members,
             "splits": {"test": [fx._clotho_record(p) for p in members]},
         }}
-        config = {"name": "Clotho", "row_filter": "reject_clips", "datasets": [
-            {"name": "Clotho", "tasks": ["commonsense"], "splits": ["test"]}]}
-        rows, _ = fx._load(datasets, config, split="test", clips_per_split=2)
+        try:
+            fx._load(datasets, {**config, "row_filter": "reject_clips"},
+                     split="test", clips_per_split=2)
+        except ValueError as e:
+            assert "commonsense" in str(e).lower(), e
+        else:
+            raise AssertionError("expected ValueError")
     finally:
         del fx.filters.FILTER_REGISTRY["reject_clips"]
 
-    assert [f.audio_path for f in rows.report.render_failures] == [
-        "test/t2.wav", "test/t3.wav"], rows.report.render_failures
-    assert rows.report.splits[0].clips_found == 2, rows.report.splits
-
-    print("PASS: a clip the row filter drops neither counts nor fails to render.")
-
-
-def test_regular_run_raises_on_a_task_with_no_prompt_templates_even_if_filtered() -> None:
-    # The random filter rejects about half the rows, so a regular run must raise
-    # before it asks the filter.
-    config = {"name": "Clotho", "row_filter": "random", "datasets": [
-        {"name": "Clotho", "tasks": ["commonsense"], "splits": ["test"]}]}
-    try:
-        rows, _ = fx._load(fx.CLOTHO, config, split="test")
-    except RuntimeError as e:
-        assert "commonsense" in str(e).lower(), e
-    else:
-        raise AssertionError(f"expected RuntimeError, got {len(rows)} rows")
-
-    class _Raising(fx.filters.RowFilter):
-        def include_row(self, row) -> bool:
-            raise AssertionError("the filter ran before the template error")
-
-    fx.filters.FILTER_REGISTRY["raising"] = _Raising
-    try:
-        fx._load(fx.CLOTHO, {**config, "row_filter": "raising"}, split="test")
-    except RuntimeError as e:
-        assert "commonsense" in str(e).lower(), e
-    else:
-        raise AssertionError("expected RuntimeError")
-    finally:
-        del fx.filters.FILTER_REGISTRY["raising"]
-
-    print("PASS: a regular run raises on missing prompt templates before the filter runs.")
+    print("PASS: a task with no prompt templates raises, in smoke runs too.")
 
 
 def test_regular_run_raises_on_a_render_failure() -> None:
