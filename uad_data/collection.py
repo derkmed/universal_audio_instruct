@@ -41,5 +41,8 @@ class UadCollection:
         return list(set(
             task for d in self.internal_datasets for task in d.tasks))
 
+    def get_datasets_with_splits(self, split) -> list[InternalDataset]:
+        return [d for d in self.internal_datasets if split in d.get_splits()]
+
     def is_random_prompt_format_selection(self) -> bool:
         return self.randomize_prompt_format
