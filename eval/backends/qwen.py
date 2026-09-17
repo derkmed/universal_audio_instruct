@@ -15,8 +15,9 @@ class QwenBackend(ModelBackend):
     """Qwen3-Omni backend with batched inference.
 
     Batching strategy:
-      - Audio bytes are written to temp WAV files in parallel (ThreadPoolExecutor)
-        so process_mm_info can read them.
+      - Raw audio bytes are written unchanged to temp files (with a .wav suffix,
+        whatever the source format) in parallel (ThreadPoolExecutor) so
+        process_mm_info can read them. The preprocessed audio_array is unused.
       - process_mm_info is called per-conversation to extract audio features.
       - processor(text=[...], audio=[...], padding=True) batches all processed
         audio and text in one call.

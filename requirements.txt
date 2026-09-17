@@ -1,5 +1,5 @@
 torch
-transformers>=4.51.0
+transformers>=5.5.0  # Gemma 4 arrived in 5.5.0 (Qwen3-Omni alone needs >=4.57.0)
 datasets==3.6.0
 huggingface_hub
 jinja2

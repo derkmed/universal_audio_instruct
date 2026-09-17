@@ -1,10 +1,12 @@
 """Qwen3-Omni training backend.
 
-Mirrors `eval.backends.qwen.QwenBackend`'s batched path -- audio bytes written
-to temp WAVs so `process_mm_info` can read them, conversations rendered with
-`apply_chat_template(tokenize=False)`, then one batched
-`processor(text=[...], audio=[...], padding=True)` call -- extended with the
-assistant answer turn and prompt-masked labels for training.
+Mirrors `eval.backends.qwen.QwenBackend`'s batched path -- raw audio bytes
+written to temp files so `process_mm_info` can read them, conversations
+rendered with `apply_chat_template(tokenize=False)`, then batched
+`processor(text=[...], audio=[...], padding=True)` calls -- extended with the
+assistant answer turn and prompt-masked labels for training. Unlike eval, it
+pads on the right and calls the processor twice (full conversation, then prompt
+only) to find where each answer starts.
 """
 import os
 import tempfile

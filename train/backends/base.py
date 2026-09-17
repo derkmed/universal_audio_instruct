@@ -30,7 +30,7 @@ from ..config import TrainConfig
 
 
 class TrainBackend(ABC):
-    """Loads a (QLoRA-wrapped) model+processor and collates uad_data rows into batches."""
+    """Loads a 4-bit and/or LoRA-wrapped model+processor and collates uad_data rows."""
 
     def __init__(self, config: TrainConfig) -> None:
         self.config = config

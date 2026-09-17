@@ -20,10 +20,10 @@ flowchart TD
     CLI --> BE["ModelBackend<br/>GemmaBackend / QwenBackend"]
     LOADER -- "row dicts" --> EV["Evaluator.evaluate"]
 
-    subgraph BATCH["per batch (preprocessing overlaps GPU inference)"]
-        PRE["preprocess_audio (uad_data.audio_utils)<br/>decode → 16 kHz mono float32, thread pool"]
+    subgraph BATCH["per batch (batches run one after another)"]
+        PRE["preprocess_audio (uad_data.audio_utils)<br/>decode → 16 kHz mono float32, thread pool<br/>(Gemma uses it; Qwen reads the raw bytes)"]
         REQ["InferenceRequest batch<br/>(audio + sys_inst + prompt + ground truth)"]
-        GEN["backend.generate_batch<br/>(one forward pass; falls back to sequential)"]
+        GEN["backend.generate_batch<br/>(one batched generate call; falls back to sequential)"]
         PRE --> REQ --> GEN
     end
 
@@ -39,10 +39,10 @@ flowchart TD
 | --- | --- |
 | `main.py` | CLI entry point; wires config → loader → backend → evaluator |
 | `config.py` | `EvalConfig` + `DEFAULT_MODEL_PATHS` (registry shared with `train/`) |
-| `evaluator.py` | batch loop: threaded audio preprocessing overlapping GPU inference, incremental `results.jsonl`, WER |
+| `evaluator.py` | batch loop: threaded audio decoding, then one batched generate call per batch; incremental `results.jsonl`; one WER over all rows |
 | `backends/base.py` | `ModelBackend` ABC + `InferenceRequest` |
 | `backends/gemma.py` | Gemma: audio arrays in chat messages, batched `processor(text, audio)` |
-| `backends/qwen.py` | Qwen3-Omni: temp WAVs + `process_mm_info`, batched processing |
+| `backends/qwen.py` | Qwen3-Omni: raw audio bytes in temp files + `process_mm_info`, batched processing |
 
 To evaluate a finetuned checkpoint, merge the LoRA adapter and pass it via
 `--model-path` — see [`FINETUNING.md`](../FINETUNING.md#evaluating-a-finetuned-model).

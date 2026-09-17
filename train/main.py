@@ -5,9 +5,11 @@ Run from the repo root as a module:
     python -m train.main --model GEMMA-4 --json-config configs/clotho_config.json
 
 Flow: parse flags into a `TrainConfig`, load the requested dataset slice via
-`uad_data.load_uad_dataset` (the exact rows eval sees), build the chosen QLoRA
-train backend, then run the HuggingFace `Trainer` with the backend's `collate`
-as the data collator. Saves the LoRA adapter + processor to `--output-dir`.
+`uad_data.load_uad_dataset` (the exact rows eval sees), build the chosen train
+backend (QLoRA, LoRA or full finetune, per the flags), then run the HuggingFace
+`Trainer` with the backend's `collate` as the data collator. Saves the LoRA
+adapter (or the full weights, for a full finetune) + processor to
+`--output-dir`.
 
 QLoRA recipe: https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora
 """

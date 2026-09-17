@@ -1,10 +1,11 @@
 """Expand the UAD dataset into evaluation rows without a HF loading script.
 
-Public entry point: `load_uad_dataset(...)`. It reproduces exactly what the old
-`load_dataset("AudioInstruct/Universal-Audio-Understanding", ...,
-trust_remote_code=True)` produced -- the same row schema (audio bytes,
-system_instruction, prompt, output, task, split, originating_dataset, plus the
-per-task metadata fields) -- so the downstream Evaluator is unchanged.
+Public entry point: `load_uad_dataset(...)`. It produces the same core fields as
+the old `load_dataset("AudioInstruct/Universal-Audio-Understanding", ...,
+trust_remote_code=True)` -- audio, system_instruction, prompt, output, task,
+split, originating_dataset, plus the per-task metadata fields -- so the
+downstream Evaluator is unchanged. Rows also carry every other field of the
+clip's metadata record, and a `tasks` list of `Task` values.
 
 Pipeline per selected internal dataset + split:
   1. obtain the audio archive and the split metadata JSON from the Hub,
