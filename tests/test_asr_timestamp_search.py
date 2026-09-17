@@ -23,7 +23,7 @@ import tempfile
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from uad_data import filters, hub, loader  # noqa: E402
+from uad_data import filters, hub, loader, prompts  # noqa: E402
 
 # Hub prompts/asr_timestamp_search.json at c4e1b16: 2 system instructions x 2 outputs.
 TIMESTAMP_PROMPT = {
@@ -167,9 +167,11 @@ def _patched_hub(**fakes):
     """Swap hub.* attributes for fakes, restoring the real ones on exit.
 
     Same as in test_loader.py: restoring them keeps one test's fakes from leaking
-    into later tests in the same pytest run.
+    into later tests in the same pytest run. Also restores prompts.PROMPTS_DIR,
+    which load_uad_dataset points at the faked, temporary prompts folder.
     """
     originals = {name: getattr(hub, name) for name in fakes}
+    prompts_dir = prompts.PROMPTS_DIR
     for name, fake in fakes.items():
         setattr(hub, name, fake)
     try:
@@ -177,6 +179,7 @@ def _patched_hub(**fakes):
     finally:
         for name, original in originals.items():
             setattr(hub, name, original)
+        prompts.PROMPTS_DIR = prompts_dir
 
 
 @contextlib.contextmanager
@@ -338,6 +341,17 @@ def test_non_object_utterance_fails_only_when_rendered() -> None:
     print("PASS: a string or list utterance fails only when its rows render.")
 
 
+def test_load_leaves_prompts_dir_unchanged() -> None:
+    before = prompts.PROMPTS_DIR
+    _load_rows("libricss", LIBRICSS_METADATA)
+    assert prompts.PROMPTS_DIR == before, prompts.PROMPTS_DIR
+
+    _load_error("SparseLibriMix", BAD_UTTERANCE_METADATA)
+    assert prompts.PROMPTS_DIR == before, prompts.PROMPTS_DIR
+
+    print("PASS: prompts.PROMPTS_DIR is restored after a load, even a failed one.")
+
+
 if __name__ == "__main__":
     test_one_row_per_utterance_and_template()
     test_utterance_times_win_over_record_times()
@@ -345,3 +359,4 @@ if __name__ == "__main__":
     test_bad_utterance_fails_only_its_own_rows()
     test_unusable_transcriptions_fail_only_when_rendered()
     test_non_object_utterance_fails_only_when_rendered()
+    test_load_leaves_prompts_dir_unchanged()
