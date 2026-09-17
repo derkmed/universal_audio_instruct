@@ -1,8 +1,8 @@
 """Offline end-to-end test for uad_data.loader.
 
 Builds a synthetic audio archive + metadata + prompt file, temporarily swaps the
-Hub download functions for fakes so nothing touches the network (restoring them
-afterwards), and asserts the loader emits
+Hub download functions for fakes so nothing touches the network (restoring them,
+and prompts.PROMPTS_DIR, afterwards), and asserts the loader emits
 the same rows the old HF loading script would have -- including the
 (audio x task x prompt-template) expansion and independent (non-aliased) rows.
 
@@ -20,7 +20,7 @@ import tempfile
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from uad_data import filters, hub, loader  # noqa: E402
+from uad_data import filters, hub, loader, prompts  # noqa: E402
 
 # Real caption.json structure: 1 system instruction x 1 prompt x 2 outputs.
 CAPTION_PROMPT = {
@@ -104,8 +104,12 @@ def _patched_hub(**fakes):
     loader calls the functions through the module (`hub.download_file(...)`), so
     patching the hub module's attributes is enough. Restoring them keeps one test's
     fakes from leaking into later tests in the same pytest run.
+
+    Also restores prompts.PROMPTS_DIR, which load_uad_dataset points at the faked
+    prompts folder -- a temporary directory that is gone once the test ends.
     """
     originals = {name: getattr(hub, name) for name in fakes}
+    prompts_dir = prompts.PROMPTS_DIR
     for name, fake in fakes.items():
         setattr(hub, name, fake)
     try:
@@ -113,6 +117,7 @@ def _patched_hub(**fakes):
     finally:
         for name, original in originals.items():
             setattr(hub, name, original)
+        prompts.PROMPTS_DIR = prompts_dir
 
 
 class RejectAll(filters.SampleFilter):
@@ -243,7 +248,34 @@ def test_missing_field_fails_only_when_rendered() -> None:
     print("PASS: a record missing its caption fails only when its row renders.")
 
 
+def test_load_leaves_prompts_dir_unchanged() -> None:
+    before = prompts.PROMPTS_DIR
+    with tempfile.TemporaryDirectory() as root:
+        fx = _build_fixture(root)
+        with _patched_hub(**_fake_hub(fx)):
+            loader.load_uad_dataset(
+                json_config_path=fx["config_path"], split="test", token=None)
+        assert prompts.PROMPTS_DIR == before, prompts.PROMPTS_DIR
+
+        def failing_download_file(path_or_url, **kwargs):
+            raise OSError("download failed")
+
+        fakes = {**_fake_hub(fx), "download_file": failing_download_file}
+        try:
+            with _patched_hub(**fakes):
+                loader.load_uad_dataset(
+                    json_config_path=fx["config_path"], split="test", token=None)
+        except OSError:
+            pass
+        else:
+            raise AssertionError("expected the failing download to raise")
+        assert prompts.PROMPTS_DIR == before, prompts.PROMPTS_DIR
+
+    print("PASS: prompts.PROMPTS_DIR is restored after a load, even a failed one.")
+
+
 if __name__ == "__main__":
     test_load_expands_rows()
     test_max_samples_streams_prefix()
     test_missing_field_fails_only_when_rendered()
+    test_load_leaves_prompts_dir_unchanged()
