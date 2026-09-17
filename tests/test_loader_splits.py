@@ -25,7 +25,7 @@ import tempfile
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from uad_data import hub, loader, prompts  # noqa: E402
+from uad_data import filters, hub, loader, prompts  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -304,6 +304,33 @@ def test_cap_takes_clips_in_archive_order_not_metadata_order() -> None:
     print("PASS: the cap takes the first clips in archive order.")
 
 
+class _RejectClipsFilter(filters.RowFilter):
+    """Rejects every row of the clips named in REJECTED."""
+
+    REJECTED = {"test/t0.wav", "test/t1.wav"}
+
+    def include_row(self, row) -> bool:
+        return row.audio_path not in self.REJECTED
+
+
+def test_cap_skips_clips_whose_rows_are_all_filtered_out() -> None:
+    filters.FILTER_REGISTRY["reject_clips"] = _RejectClipsFilter
+    try:
+        members = [f"test/t{i}.wav" for i in range(4)]
+        datasets = {"Clotho": {
+            "members": members,
+            "splits": {"test": [_clotho_record(p) for p in members]},
+        }}
+        rows, _ = _load(datasets, _clotho_config(row_filter="reject_clips"),
+                        split="test", clips_per_split=2)
+    finally:
+        del filters.FILTER_REGISTRY["reject_clips"]
+
+    assert _clips(rows) == [("test", "test/t2.wav"), ("test", "test/t3.wav")], _clips(rows)
+
+    print("PASS: a clip counts toward the cap only once one of its rows is kept.")
+
+
 def test_clip_listed_in_two_splits_counts_toward_both() -> None:
     members = ["shared.wav", "val_only.wav", "test_only.wav"]
     datasets = {"Clotho": {
@@ -406,11 +433,45 @@ def test_template_picks_are_stable_across_n_and_split() -> None:
             if key in everything:
                 assert pick == everything[key], f"{run}: {key} got {pick}, not {everything[key]}"
     assert ("test", "test/t0.wav", "caption") in picks[("test", 1)]
-    # With 8 templates, 9 clips picking the same one would mean no randomness.
-    rows, _ = _load(CLOTHO, _random_clotho_config(), split="all")
-    assert len(set(_template_picks(rows).values())) > 1, "every clip got the same template"
 
     print("PASS: a clip gets the same template whatever n or split is.")
+
+
+def test_template_picks_do_not_depend_on_the_clips_read_before() -> None:
+    # validation/ is stored last: a "validation" run reads no other clip first,
+    # "validation+test" reads test/ first, and "all" reads test/ and train/ first.
+    picks = {}
+    for split, n in [("validation", None), ("validation", 1),
+                     ("validation+test", None), ("all", None), ("all", 2)]:
+        rows, _ = _load(CLOTHO, _random_clotho_config(), split=split, clips_per_split=n)
+        picks[(split, n)] = {
+            key: pick for key, pick in _template_picks(rows).items()
+            if key[0] == "validation"}
+
+    alone = picks[("validation", None)]
+    assert len(alone) == 3, alone
+    for run, run_picks in picks.items():
+        assert run_picks, f"{run}: no validation rows"
+        for key, pick in run_picks.items():
+            assert pick == alone[key], f"{run}: {key} got {pick}, not {alone[key]}"
+
+    print("PASS: a clip's template doesn't depend on which clips were read before it.")
+
+
+def test_template_picks_vary_between_clips_of_one_split() -> None:
+    members = [f"test/t{i}.wav" for i in range(12)]
+    datasets = {"Clotho": {
+        "members": members,
+        "splits": {"test": [_clotho_record(p) for p in members]},
+    }}
+    rows, _ = _load(datasets, _random_clotho_config(), split="test")
+
+    # 8 template combinations over 12 clips: one shared pick means the pick
+    # ignores the clip.
+    system_and_prompt = {(p[0], p[1]) for p in _template_picks(rows).values()}
+    assert len(system_and_prompt) > 1, system_and_prompt
+
+    print("PASS: clips in one split get different templates.")
 
 
 def test_seed_changes_the_picks() -> None:
