@@ -43,6 +43,7 @@ from typing import Any, Iterator
 import datasets
 
 from . import hub
+from . import io_templates
 from . import prompts as prompts_lib
 from .collection import UadCollection
 from .internal_dataset import InternalDataset
@@ -359,9 +360,15 @@ def _clip_rows(
             try:
                 templates = _get_prompt_templates(task, rng)
             except Exception as error:
-                # No template means no row to filter, so the pass counts as wanted.
-                counts = True
-                failed(task, utterance_index, error)
+                # With no template to render, ask the filter about a blank one.
+                placeholder = Row(
+                    audio_path=audio_path, dataset_name=internal_dataset.name,
+                    split=split, task=task, audio_data=file_bytes, metadata=record,
+                    prompt_template=io_templates.PromptTemplate(task=task, template=""),
+                    utterance_index=utterance_index)
+                if collection.row_filter.include_row(placeholder):
+                    counts = True
+                    failed(task, utterance_index, error)
                 continue
             for si_t, p_t, o_t in templates:
                 row = Row(
