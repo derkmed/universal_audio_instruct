@@ -1,9 +1,15 @@
 """Offline load check for the run configs complete-1..5 (issue #3).
 
-Pinned to commit 8f0b6f9. Run it from a checkout of that commit, e.g.
-`git worktree add ../uad-8f0b6f9 8f0b6f9`. Later commits renamed the `uad_data`
-names it uses (`Sample`, `iter_samples`, `sample_filter`), and the code here is
-kept as it was so that it still reproduces the findings.
+Pinned to commit 8f0b6f9: run it against the `uad_data` of that commit. The
+script itself was committed later, so copy it into a checkout of 8f0b6f9 and
+run it there, e.g.
+    git worktree add ../uad-8f0b6f9 8f0b6f9
+    mkdir -p ../uad-8f0b6f9/docs/research
+    cp docs/research/complete-configs-load-check.py ../uad-8f0b6f9/docs/research/
+It imports `uad_data` from the checkout it sits in, so running it here fails:
+later commits renamed the names it uses (`Sample`, `iter_samples`,
+`sample_filter`). The code is kept as it was so that it still reproduces the
+findings.
 
 Answers "would a smoke run over complete-1..5 load cleanly today?" by running the
 real `uad_data` code (config validation, metadata loading, prompt matching,
