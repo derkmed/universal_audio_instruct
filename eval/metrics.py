@@ -72,7 +72,11 @@ _CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])(?!\w)")
 # clapping" or "I think so" says nothing about which choice it means. Those two
 # letters count only with a choice marker after them, or standing alone.
 _WORD_LETTERS = frozenset("ai")
-_MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])\s*(?:[^\w\s]|$)")
+# A line break ends the letter as surely as a full stop does -- a model that
+# answers "B\nBecause ..." has put the letter on its own line, not opened a
+# sentence with it -- so it counts as a marker. Without that, "A\nBecause ..."
+# and "B\nBecause ..." score differently on identical formatting.
+_MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])[ \t]*(?:[^\w\s]|\n|$)")
 
 # Loaded lazily and kept, because `evaluate.load` reads from disk on every call.
 _wer_metric = None

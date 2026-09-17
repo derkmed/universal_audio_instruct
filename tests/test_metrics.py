@@ -151,6 +151,58 @@ def test_commonsense_hits_on_the_answers_choice_letter() -> None:
     print("PASS: commonsense hits on the prediction starting with the choice letter.")
 
 
+def test_prose_opening_with_a_or_i_is_not_read_as_that_choice() -> None:
+    """"A" and "I" are English words, so alone they say nothing about the choice."""
+    row = _row("commonsense", commonsense_answer="A. the kettle is boiling")
+
+    assert metrics.metric_value(row, "A person is clapping their hands.") == 0.0
+    # A letter with a marker after it, or standing alone, is still a choice.
+    assert metrics.metric_value(row, "A. the kettle is boiling") == 1.0
+    assert metrics.metric_value(row, "(a)") == 1.0
+    assert metrics.metric_value(row, "A") == 1.0
+
+    eye = _row("commonsense", commonsense_answer="I. the kettle is boiling")
+    assert metrics.metric_value(eye, "I think so.") == 0.0
+    assert metrics.metric_value(eye, "I) the kettle") == 1.0
+
+    print("PASS: prose opening with A or I is not read as that choice.")
+
+
+def test_a_choice_letter_that_is_not_a_word_needs_no_marker() -> None:
+    """"B is correct" opens with choice B; only A and I could mean something else.
+
+    Demanding a marker after every letter turned plain answers into false misses
+    and deflated the group's hit rate for no gain.
+    """
+    row = _row("commonsense", commonsense_answer="B. the kettle is boiling")
+
+    assert metrics.metric_value(row, "B is correct") == 1.0
+    assert metrics.metric_value(row, "B the dog barks") == 1.0
+    assert metrics.metric_value(row, "C is correct") == 0.0
+    # A word that merely begins with the letter is still not the letter.
+    assert metrics.metric_value(row, "Boiling water") == 0.0
+
+    print("PASS: a choice letter that is not an English word needs no marker.")
+
+
+def test_a_choice_letter_alone_on_its_line_is_still_a_choice() -> None:
+    """Otherwise A and I score differently from B on identically formatted answers.
+
+    A newline ends the letter as surely as a full stop does: the letter stands
+    alone on its line, so it is not the word "A" or "I" opening a sentence.
+    """
+    a = _row("commonsense", commonsense_answer="A. the kettle is boiling")
+    b = _row("commonsense", commonsense_answer="B. the kettle is boiling")
+
+    answer_on_its_own_line = "{}\nBecause the dog is barking"
+    assert metrics.metric_value(b, answer_on_its_own_line.format("B")) == 1.0
+    assert metrics.metric_value(a, answer_on_its_own_line.format("A")) == 1.0
+    # Still prose when the letter runs on into the same line.
+    assert metrics.metric_value(a, "A dog is barking") == 0.0
+
+    print("PASS: a choice letter alone on its line is still a choice.")
+
+
 def test_every_row_with_a_prediction_counts_in_its_hit_rate_group() -> None:
     """The spec's inclusion rule, taken as written.
 
