@@ -38,6 +38,7 @@ import json
 import logging
 import random
 import tarfile
+import zlib
 from typing import Any, Iterator
 
 import datasets
@@ -143,6 +144,9 @@ def _get_prompt_templates(task: Task, rng: random.Random | None):
         raise PromptTemplateError(
             f"Multiple prompt files correspond to task: {task_prompt_files}. Should only be 1.")
     task_prompt_file = task_prompt_files[0]
+    if not task_prompt_file.all_templates:
+        raise PromptTemplateError(
+            f"The prompt file {task_prompt_file.filepath} for {task} gives no templates.")
     if rng is not None:
         return [task_prompt_file.random_template_selection(rng)]
     return task_prompt_file.all_templates
@@ -236,6 +240,13 @@ def _iter_rows(
                         entry.dataset, entry.split, entry.clips_found, clips_per_split)
 
 
+# What "this internal dataset failed to load" is made of: a missing or unreadable
+# metadata JSON, and an archive that can't be fetched, decompressed or read.
+# `PromptTemplateError` and anything else is a config or code problem that every
+# internal dataset would hit, so it stops the run even in a smoke run.
+LOAD_ERRORS = (OSError, tarfile.TarError, EOFError, zlib.error, json.JSONDecodeError)
+
+
 def _rows_until_failure(
     dataset_rows: Iterator[dict[str, Any]], dataset: str, report: LoadReport,
 ) -> Iterator[dict[str, Any]]:
@@ -246,10 +257,7 @@ def _rows_until_failure(
             row = next(dataset_rows)
         except StopIteration:
             break
-        except PromptTemplateError:
-            # A config problem, not this internal dataset's data: stop the run.
-            raise
-        except Exception as error:
+        except LOAD_ERRORS as error:
             logger.warning(
                 "Failed to load %s after %d rows; moving on: %s",
                 dataset, rows_kept, error)
@@ -397,7 +405,10 @@ def _clip_rows(
                 try:
                     rows.append(row.to_output())
                 except Exception as error:
+                    # Every template of this task renders the same fields, so it
+                    # fails the same way: report the pass once.
                     failed(task, utterance_index, error)
+                    break
     return rows, counts
 
 

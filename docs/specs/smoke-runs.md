@@ -335,7 +335,9 @@ Every eval run produces these, not only smoke runs.
 Wherever "sample" means a row, it becomes "row":
 
 - `Sample` → `Row`, and `uad_data/sample.py` → `uad_data/row.py`;
-- `iter_samples` → `iter_rows`;
+- `iter_samples` → `iter_rows` (renamed again to `_iter_rows` while building
+  slice 3, in [#36]: `load_uad_dataset` is the loader's only entry point, so the
+  cap alone decides that a run is a smoke run);
 - `SampleFilter` → `RowFilter`, and `include_sample` → `include_row`;
 - the evaluator's `samples` variables → `rows`;
 - the run config key `sample_filter` → `row_filter`. No config uses the old key,
@@ -799,3 +801,4 @@ See [Acceptance](#acceptance).
 [#14]: https://github.com/derkmed/universal_audio_instruct/pull/14
 [#18]: https://github.com/derkmed/universal_audio_instruct/issues/18
 [#20]: https://github.com/derkmed/universal_audio_instruct/issues/20
+[#36]: https://github.com/derkmed/universal_audio_instruct/issues/36

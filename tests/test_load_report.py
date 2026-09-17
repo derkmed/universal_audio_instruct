@@ -123,6 +123,45 @@ def test_regular_run_raises_on_a_render_failure() -> None:
     print("PASS: a regular run raises on a render failure.")
 
 
+def test_a_task_whose_templates_are_all_empty_raises() -> None:
+    """An empty template cross-product is the same config problem as no file."""
+    datasets_ = {"Clotho": {
+        "members": ["test/t0.wav"], "splits": {"test": [fx._clotho_record("test/t0.wav")]}}}
+    config = {"name": "Clotho", "datasets": [
+        {"name": "Clotho", "tasks": ["caption"], "splits": ["test"]}]}
+    empty = {"task": "caption", "prompts": [], "outputs": ["{{caption}}"]}
+    original = dict(fx.CAPTION_PROMPT)
+    fx.CAPTION_PROMPT.clear()
+    fx.CAPTION_PROMPT.update(empty)
+    try:
+        rows, _ = fx._load(datasets_, config, split="test", clips_per_split=1)
+    except ValueError as e:
+        assert "caption" in str(e).lower(), e
+    else:
+        raise AssertionError(f"expected ValueError, got {len(rows)} rows")
+    finally:
+        fx.CAPTION_PROMPT.clear()
+        fx.CAPTION_PROMPT.update(original)
+
+    print("PASS: a task whose templates are all empty raises.")
+
+
+def test_one_unrenderable_clip_is_reported_once_per_task() -> None:
+    # The caption prompt file gives 8 template combinations; the clip has no caption.
+    datasets_ = {"Clotho": {
+        "members": ["test/t0.wav"], "splits": {"test": [{"audio_path": "test/t0.wav"}]}}}
+    config = {"name": "Clotho", "datasets": [
+        {"name": "Clotho", "tasks": ["caption"], "splits": ["test"]}]}
+    with _Warnings() as caught:
+        rows, _ = fx._load(datasets_, config, split="test", clips_per_split=1)
+
+    assert rows == [], rows
+    assert len(rows.report.render_failures) == 1, rows.report.render_failures
+    assert len([m for m in caught.messages if "Failed to render" in m]) == 1, caught.messages
+
+    print("PASS: one unrenderable clip gives one render failure per task.")
+
+
 class _MissingFilesHub(fx._FakeHub):
     """A fake Hub on which the files in `missing` don't exist."""
 
@@ -198,6 +237,30 @@ def test_smoke_run_records_a_missing_metadata_file_and_moves_on() -> None:
         ("EMNS", "train", 0), ("Clotho", "test", 2)], rows.report.splits
 
     print("PASS: a smoke run records a missing metadata file and loads the next dataset.")
+
+
+def test_a_smoke_run_does_not_record_a_bug_in_the_row_filter_as_a_load_failure() -> None:
+    """Only archive and metadata errors are load failures; anything else is a bug."""
+
+    class _Broken(fx.filters.RowFilter):
+        def include_row(self, row) -> bool:
+            raise TypeError("a bug in the filter")
+
+    fx.filters.FILTER_REGISTRY["broken"] = _Broken
+    try:
+        config = {"name": "Clotho", "row_filter": "broken", "datasets": [
+            {"name": "Clotho", "tasks": ["caption"], "splits": ["test"]}]}
+        try:
+            rows, _ = fx._load(fx.CLOTHO, config, split="test", clips_per_split=2)
+        except TypeError as e:
+            assert "a bug in the filter" in str(e), e
+        else:
+            raise AssertionError(
+                f"expected TypeError, got {len(rows)} rows and {rows.report.load_failures}")
+    finally:
+        del fx.filters.FILTER_REGISTRY["broken"]
+
+    print("PASS: a bug in a row filter is not recorded as a load failure.")
 
 
 def test_regular_run_raises_on_a_truncated_archive_or_missing_metadata() -> None:
