@@ -58,6 +58,10 @@ _Avoid_: debug run, sampled run
 A training or evaluation run with no cap on clips per split. It stops at the first error, where a smoke run records the error and carries on.
 _Avoid_: full run (a regular run can still use a small run config)
 
+**Valid internal dataset**:
+An internal dataset whose train split loads and renders every row without error in a smoke run. Only valid internal datasets go into a finetune's run config.
+_Avoid_: clean dataset, well-formed dataset
+
 **Load report**:
 The record that comes back with a run's rows: clips found for each internal dataset and selected split, internal datasets that failed to load, and rows that failed to render.
 
