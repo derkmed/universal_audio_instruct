@@ -218,6 +218,15 @@ def test_plus_joined_split_selects_each_named_split() -> None:
     print("PASS: validation+test selects both splits.")
 
 
+def test_split_can_be_a_datasets_split() -> None:
+    import datasets
+
+    rows, _ = _load(CLOTHO, _clotho_config(), split=datasets.Split.TEST)
+    assert {r["split"] for r in rows} == {"test"}, rows
+
+    print("PASS: a datasets.Split request loads like its name.")
+
+
 def test_all_selects_every_split_the_entry_lists() -> None:
     rows, _ = _load(CLOTHO, _clotho_config(), split="all")
     assert {r["split"] for r in rows} == {"train", "validation", "test"}, rows

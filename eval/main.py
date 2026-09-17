@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         dest="clips_per_split",
-        help="Evaluate only the first N clips of each selected split (useful for debugging)",
+        help="Evaluate only the first N clips of each selected split (for smoke runs)",
     )
     p.add_argument(
         "--max-new-tokens",
