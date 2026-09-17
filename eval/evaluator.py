@@ -66,7 +66,7 @@ def print_group_table(summary: dict) -> None:
         metric = "-" if group["metric"] is None or value is None else (
             f"{group['metric']} {value:.4f}")
         lines.append([
-            f"{group['dataset']}/{group['split']}/{group['task']}",
+            f"{group['originating_dataset']}/{group['split']}/{group['task']}",
             clips,
             str(group["rows"]),
             *(str(group["statuses"][status]) for status in STATUSES),
@@ -121,7 +121,7 @@ class Evaluator:
 
         records: List[dict] = []
         # group key -> the (row, prediction) pairs its metric is computed over.
-        scorable: dict[tuple[str, str, str], list[tuple[dict, str]]] = {}
+        predicted: dict[tuple[str, str, str], list[tuple[dict, str]]] = {}
 
         # Opened once here; each batch flushes to it so results survive a mid-run crash.
         jsonl_file = self._open_jsonl(self.config.output_dir)
@@ -131,28 +131,30 @@ class Evaluator:
                 for batch in _batched(rows, self.config.batch_size):
                     # Parallel audio decode + resample, then one GPU forward pass.
                     prepared = self._preprocess_batch(batch, preprocess_fn, executor)
-                    predictions = self._predict(
+                    predictions, batch_error = self._predict(
                         [request for request in prepared if isinstance(request, InferenceRequest)])
 
                     for row, request in zip(batch, prepared):
                         if not isinstance(request, InferenceRequest):
+                            # The row never reached the model, but its prompt and
+                            # ground truth are its own, and triage wants them.
                             record = self._record(
                                 len(records), row, status="audio_error",
                                 error=_describe(request))
                         elif predictions is None:
                             record = self._record(
                                 len(records), row, request=request, status="model_error",
-                                error=self._batch_error)
+                                error=batch_error)
                         else:
                             prediction = predictions.pop(0)
                             status = "ok" if prediction.strip() else "empty_output"
                             record = self._record(
                                 len(records), row, request=request, status=status,
                                 prediction=prediction)
-                            scorable.setdefault(self._key(record), []).append((row, prediction))
+                            predicted.setdefault(self._key(record), []).append((row, prediction))
 
                         records.append(record)
-                        self._print_row(record, total, request)
+                        self._print_row(record, total)
                         self._write(jsonl_file, record)
 
             # Rows the loader could never render reach the report, not the model.
@@ -169,7 +171,7 @@ class Evaluator:
             if jsonl_file:
                 jsonl_file.close()
 
-        summary = self._summarise(records, scorable, report)
+        summary = self._summarise(records, predicted, report)
         summary["rows"] = records
 
         print_group_table(summary)
@@ -214,33 +216,50 @@ class Evaluator:
             "split": row.get("split") or "",
             "task": task,
             "audio_path": row.get("audio_path") or "",
-            "sys_inst": request.sys_inst if request else "",
-            "prompt": request.prompt_text if request else "",
-            "ground_truth": request.ground_truth if request else "",
+            # A row that never reached the model has no request, but it still
+            # has its own rendered text, which is what triage reads.
+            "sys_inst": request.sys_inst if request else (
+                row.get("system_instruction") or "").strip(),
+            "prompt": request.prompt_text if request else (row.get("prompt") or "").strip(),
+            "ground_truth": request.ground_truth if request else (
+                row.get("output") or "").strip(),
             "answer": metrics.answer_of(row),
             "prediction": prediction,
             "status": status,
             "error": error,
             "metric": metrics.metric_name(task),
-            "metric_value": None if prediction is None else metrics.score(row, prediction),
+            "metric_value": (
+                None if prediction is None else metrics.metric_value(row, prediction)),
         }
 
-    def _predict(self, requests: List[InferenceRequest]) -> Optional[List[str]]:
-        """Predictions for one batch, or None when the backend raised in a smoke run."""
-        self._batch_error = None
+    def _predict(
+        self, requests: List[InferenceRequest],
+    ) -> tuple[Optional[List[str]], Optional[str]]:
+        """One batch's predictions, or `(None, error)` when the backend let it down.
+
+        A backend that raises and one that returns the wrong number of
+        predictions are the same failure: this batch has no usable answers. Both
+        are caught here, so the rest of the loop can count on one prediction per
+        request. A regular run re-raises instead.
+        """
         if not requests:
-            return []
+            return [], None
         try:
-            return list(self.backend.generate_batch(requests))
+            predictions = list(self.backend.generate_batch(requests))
+            if len(predictions) != len(requests):
+                raise ValueError(
+                    f"backend returned {len(predictions)} predictions "
+                    f"for {len(requests)} requests")
         except Exception as error:
             if not self.config.is_smoke_run:
                 raise  # a regular run stops at the first error
-            self._batch_error = _describe(error)
-            print(f"  backend failed for this batch: {self._batch_error}")
-            return None
+            described = _describe(error)
+            print(f"  backend failed for this batch: {described}")
+            return None, described
+        return predictions, None
 
     @staticmethod
-    def _print_row(record: dict, total: int, request) -> None:
+    def _print_row(record: dict, total: int) -> None:
         width = len(str(total))
         index = record["index"] + 1
         if record["prediction"] is None:
@@ -297,14 +316,16 @@ class Evaluator:
             ))
         return prepared
 
-    def _summarise(self, records: List[dict], scorable: dict, report: LoadReport) -> dict:
+    def _summarise(self, records: List[dict], predicted: dict, report: LoadReport) -> dict:
         """One entry per group, plus the failed loads and the run's overall result."""
         groups: dict[tuple[str, str, str], dict] = {}
 
         def entry(key: tuple[str, str, str], clips_found: Optional[int]) -> dict:
             dataset, split, task = key
             return groups.setdefault(key, {
-                "dataset": dataset,
+                # The internal dataset, named as the row records name it. The
+                # records' own `dataset` is the UAD repo, which is not this.
+                "originating_dataset": dataset,
                 "split": split,
                 "task": task,
                 "clips_found": clips_found,
@@ -328,7 +349,7 @@ class Evaluator:
             group["statuses"][record["status"]] += 1
 
         for key, group in groups.items():
-            group["metric_value"] = metrics.aggregate(group["task"], scorable.get(key, []))
+            group["metric_value"] = metrics.aggregate(group["task"], predicted.get(key, []))
             group["passed"] = group["rows"] > 0 and group["statuses"]["ok"] == group["rows"]
 
         load_failures = [

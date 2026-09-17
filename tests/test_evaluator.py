@@ -108,7 +108,8 @@ def _run(rows, backend=None, **config) -> tuple[dict, list[dict], dict, object]:
 
 def _group(summary: dict, dataset: str, split: str, task: str) -> dict:
     for group in summary["groups"]:
-        if (group["dataset"], group["split"], group["task"]) == (dataset, split, task):
+        key = (group["originating_dataset"], group["split"], group["task"])
+        if key == (dataset, split, task):
             return group
     raise AssertionError(f"no group {dataset}/{split}/{task} in {summary['groups']}")
 
@@ -182,6 +183,35 @@ def test_a_raising_backend_fails_its_whole_batch_and_the_run_goes_on() -> None:
     assert all("boom" in r["error"] for r in records[:2]), records
 
     print("PASS: a raising backend fails its batch, and the next batch still runs.")
+
+
+def test_a_backend_that_returns_too_few_predictions_fails_its_batch() -> None:
+    """A short return is the backend misbehaving, and a smoke run survives it."""
+    class ShortBackend(ModelBackend):
+        def generate_batch(self, requests):
+            return ["only one"]  # two rows go in
+
+    _, records, _, _ = _run(ROWS[:2], ShortBackend(), clips_per_split=1)
+
+    assert [r["status"] for r in records] == ["model_error", "model_error"], records
+    assert all(r["error"] for r in records), records
+
+    print("PASS: a backend returning too few predictions fails its batch, not the run.")
+
+
+def test_a_row_that_never_reached_the_model_keeps_its_prompt_in_the_record() -> None:
+    """Triaging a decode failure needs the row's own text, not just its path."""
+    rows = [_row("test/bad.wav", "test", "silence", audio=b"not audio at all")]
+
+    _, records, _, _ = _run(rows, clips_per_split=1)
+
+    record = records[0]
+    assert record["status"] == "audio_error", record
+    assert record["sys_inst"] == "You are an audio captioner.", record
+    assert record["prompt"] == "Describe the audio.", record
+    assert record["ground_truth"] == "The caption is: silence", record
+
+    print("PASS: a row that never ran still records its prompt and ground truth.")
 
 
 def test_a_row_that_failed_to_render_is_reported_from_the_load_report() -> None:
