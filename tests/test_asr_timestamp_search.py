@@ -318,9 +318,30 @@ def test_unusable_transcriptions_fail_only_when_rendered() -> None:
     print("PASS: a missing, empty or non-list transcriptions fails only when its row renders.")
 
 
+def test_non_object_utterance_fails_only_when_rendered() -> None:
+    cases = {
+        "string": ["HELLO"],
+        "list": [[0.0, 1.0, "HI"]],
+    }
+    for case, transcriptions in cases.items():
+        metadata = [{"audio_path": f"clips/{case}.wav", "transcriptions": transcriptions}]
+
+        rows = _load_rows("libricss", metadata, sample_filter="reject_all")
+        assert rows == [], f"{case}: {rows}"
+
+        # A ValueError, not the KeyError a missing-field check would give.
+        e = _load_error("libricss", metadata)
+        assert type(e) is ValueError, f"{case}: {e!r}"
+        for part in ("expected an object", f"clips/{case}.wav", "utterance 0"):
+            assert part in str(e), f"{case}: {part!r} not in {e}"
+
+    print("PASS: a string or list utterance fails only when its row renders.")
+
+
 if __name__ == "__main__":
     test_one_row_per_utterance_and_template()
     test_utterance_times_win_over_record_times()
     test_random_templates_are_picked_per_utterance()
     test_bad_utterance_fails_only_its_own_rows()
     test_unusable_transcriptions_fail_only_when_rendered()
+    test_non_object_utterance_fails_only_when_rendered()
