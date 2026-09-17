@@ -101,7 +101,8 @@ def main() -> None:
         split=config.dataset_split,
         repo_id=config.dataset_name,
         token=hf_token,
-        max_samples=config.max_samples,
+        # max_samples caps clips per split until it is renamed clips_per_split.
+        clips_per_split=config.max_samples,
     )
     print(f"Dataset loaded: {len(rows)} rows")
     if not rows:

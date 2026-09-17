@@ -182,8 +182,8 @@ def test_load_expands_rows() -> None:
     print("PASS: load_uad_dataset produced 4 correctly-expanded, independent rows.")
 
 
-def test_max_samples_streams_prefix() -> None:
-    """max_samples auto-enables the streaming archive path and stops early."""
+def test_clips_per_split_streams_prefix() -> None:
+    """clips_per_split auto-enables the streaming archive path and stops early."""
     with tempfile.TemporaryDirectory() as root:
         fx = _build_fixture(root)
         fakes = _fake_hub(fx)
@@ -206,21 +206,40 @@ def test_max_samples_streams_prefix() -> None:
         fakes["download_file"] = counting_download_file
         fakes["open_archive_stream"] = fake_open_archive_stream
 
-        # max_samples set -> stream defaults to True.
+        # clips_per_split set -> stream defaults to True.
         with _patched_hub(**fakes):
             rows = loader.load_uad_dataset(
                 json_config_path=fx["config_path"],
                 split="test",
                 token=None,
-                max_samples=1,
+                clips_per_split=1,
             )
 
-    assert len(rows) == 1, f"expected 1 row (capped), got {len(rows)}"
+    # 1 clip x (1 sysinst x 1 prompt x 2 outputs) = 2 rows.
+    assert len(rows) == 2, f"expected 2 rows (1 clip), got {len(rows)}"
+    assert {r["audio_path"] for r in rows} == {"test/a.wav"}, rows
     assert calls["stream"] == 1, "streaming archive opener was not used"
     assert calls["download_tar"] == 0, "archive was fully downloaded despite streaming"
     r = rows[0]
     assert r["task"] == "caption" and r["caption"] in r["output"], r
-    print("PASS: streaming path honored max_samples and avoided the full archive download.")
+    print("PASS: streaming path honored clips_per_split and avoided the full archive download.")
+
+
+def test_clips_per_split_must_be_positive() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        fx = _build_fixture(root)
+        for bad in (0, -1):
+            with _patched_hub(**_fake_hub(fx)):
+                try:
+                    rows = loader.load_uad_dataset(
+                        json_config_path=fx["config_path"], split="test",
+                        token=None, clips_per_split=bad)
+                except ValueError as e:
+                    assert "clips_per_split" in str(e), e
+                else:
+                    raise AssertionError(f"clips_per_split={bad}: got {len(rows)} rows")
+
+    print("PASS: clips_per_split below 1 raises.")
 
 
 def test_missing_field_fails_only_when_rendered() -> None:
@@ -276,6 +295,7 @@ def test_load_leaves_prompts_dir_unchanged() -> None:
 
 if __name__ == "__main__":
     test_load_expands_rows()
-    test_max_samples_streams_prefix()
+    test_clips_per_split_streams_prefix()
+    test_clips_per_split_must_be_positive()
     test_missing_field_fails_only_when_rendered()
     test_load_leaves_prompts_dir_unchanged()
