@@ -31,8 +31,10 @@ so the row hits.
 Three consequences are worth knowing before reading one of these numbers, all of
 them the rules as decided rather than oversights:
 
-- a `qa` group of free-text answers reports a hit rate of 1.0, whatever the
-  model said, because no number of the answer's is missing;
+- a `qa` group of free-text answers hits on every row the model answered at all,
+  whatever it said, because no number of the answer's is missing. Only its
+  `empty_output` rows miss, so such a group reports 1.0 less the share of rows
+  the model left blank;
 - a `commonsense` group whose answers carry no choice letters reports 0.0,
   because there is no letter for a prediction to start with;
 - `commonsense` asks that the prediction *start with* the choice letter, so a
@@ -58,7 +60,10 @@ WER = "wer"
 HIT_RATE = "hit_rate"
 
 _PUNCTUATION = str.maketrans({c: " " for c in string.punctuation})
-_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# A number, with optional thousands separators, so "1,000" is one number rather
+# than "1" and "000". Compared as a value (see `_numbers_of`), so "3.50" and
+# "3.5" are the same number and "1020" is still not "102".
+_NUMBER = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
 # A leading multiple-choice letter: one letter, with nothing but punctuation or
 # whitespace ahead of it, and not running into another word character. "B. ...",
 # "(b)", a bare "B" and "B is correct" all match; "boiling" does not.
@@ -107,13 +112,18 @@ def _same_choice_letter(letter: str, prediction: str) -> bool:
     return bool(letter) and _choice_letter(prediction) == letter
 
 
+def _numbers_of(text: str) -> frozenset:
+    """The numbers in `text`, as values, so "1,000" and "1000" are one number."""
+    return frozenset(float(found.replace(",", "")) for found in _NUMBER.findall(text))
+
+
 def _numbers_all_appear(numbers: frozenset, prediction: str) -> bool:
     """Every number in the answer is one of the prediction's own numbers.
 
     Compared as whole numbers, not as digits inside text, so "1020" does not
     stand in for "102".
     """
-    return numbers <= set(_NUMBER.findall(prediction))
+    return numbers <= _numbers_of(prediction)
 
 
 @dataclass(frozen=True)
@@ -140,7 +150,7 @@ _METRICS: dict[str, _Metric] = {
         HIT_RATE, "commonsense_answer", read=_choice_letter, hit=_same_choice_letter),
     "qa": _Metric(
         HIT_RATE, "answer",
-        read=lambda answer: frozenset(_NUMBER.findall(answer)), hit=_numbers_all_appear),
+        read=_numbers_of, hit=_numbers_all_appear),
 }
 
 
@@ -224,6 +234,19 @@ def _hit(metric: "_Metric", reading, prediction: str) -> float:
     if not prediction.strip():
         return 0.0
     return float(metric.hit(reading, prediction))
+
+
+def forget_failed_load() -> None:
+    """Let a failed metric load be attempted again.
+
+    The failure is remembered for a whole run, but one notebook kernel runs many
+    evaluations: a Hub blip, or a cell run before `HF_TOKEN` was set, must not
+    cost every later run its numbers too. `Evaluator.evaluate` calls this as it
+    starts.
+    """
+    global _wer_metric
+    if isinstance(_wer_metric, BaseException):
+        _wer_metric = None
 
 
 def _wer(*, predictions: list[str], references: list[str]) -> float:

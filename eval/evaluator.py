@@ -47,20 +47,6 @@ def _describe(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-def _or_none(metric_fn, *args):
-    """A preliminary metric's value, or None if computing it failed.
-
-    Metrics are information only -- "a group passes or fails on its row statuses,
-    never on these numbers" -- so one must never cost a run its `results.jsonl`
-    and `summary.json`. `evaluate.load` reaches the Hub on a cold cache, and this
-    runs per row inside the batch loop, so an offline runner or a Hub blip would
-    otherwise abort a smoke run built to tolerate far worse.
-    """
-    try:
-        return metric_fn(*args)
-    except Exception as error:
-        print(f"  metric unavailable: {_describe(error)}")
-        return None
 
 
 def print_group_table(summary: dict) -> None:
@@ -121,9 +107,38 @@ class Evaluator:
     def __init__(self, backend: ModelBackend, config: EvalConfig) -> None:
         self.backend = backend
         self.config = config
+        # Whether this run has already said a metric was unavailable.
+        self._metric_complained = False
+
+    def _metric_or_none(self, metric_fn, *args):
+        """A preliminary metric's value, or None if computing it failed.
+
+        Metrics are information only -- "a group passes or fails on its row
+        statuses, never on these numbers" -- so one must never cost a run its
+        `results.jsonl` and `summary.json`. `evaluate.load` reaches the Hub on a
+        cold cache, and this runs per row inside the batch loop, so an offline
+        runner or a Hub blip would otherwise abort a smoke run built to tolerate
+        far worse.
+
+        The complaint is made once per run: repeated per row it would bury the
+        GT/Pred output the run exists to produce.
+        """
+        try:
+            return metric_fn(*args)
+        except Exception as error:
+            if not self._metric_complained:
+                self._metric_complained = True
+                print(f"  metric unavailable, so this run reports none: "
+                      f"{_describe(error)}")
+            return None
 
     def evaluate(self, dataset) -> dict:
         rows = list(dataset)
+        # Each call is its own run: one notebook kernel evaluates many times, so
+        # a metric that failed to load earlier gets another chance here, and this
+        # run says so once if it fails again.
+        metrics.forget_failed_load()
+        self._metric_complained = False
         # `load_uad_dataset` returns rows carrying their load report. A caller
         # that hands over a plain list (the tests, the notebook) gets an empty one.
         report: LoadReport = getattr(dataset, "report", None) or LoadReport()
@@ -182,6 +197,7 @@ class Evaluator:
                     "split": failure.split,
                     "task": failure.task,
                     "audio_path": failure.audio_path,
+                    "utterance_index": failure.utterance_index,
                 }, status="render_error", error=failure.error)
                 records.append(record)
                 self._write(jsonl_file, record)
@@ -234,6 +250,9 @@ class Evaluator:
             "split": row.get("split") or "",
             "task": task,
             "audio_path": row.get("audio_path") or "",
+            # asr_timestamp_search renders one row per utterance, so without this
+            # two failures of one clip are the same line twice. None elsewhere.
+            "utterance_index": row.get("utterance_index"),
             # A row that never reached the model has no request, but it still
             # has its own rendered text, which is what triage reads.
             "sys_inst": request.sys_inst if request else (
@@ -247,7 +266,7 @@ class Evaluator:
             "error": error,
             "metric": metrics.metric_name(task),
             "metric_value": (
-                None if prediction is None else _or_none(metrics.metric_value, row, prediction)),
+                None if prediction is None else self._metric_or_none(metrics.metric_value, row, prediction)),
         }
 
     def _predict(
@@ -380,7 +399,7 @@ class Evaluator:
             group["statuses"][record["status"]] += 1
 
         for key, group in groups.items():
-            group["metric_value"] = _or_none(
+            group["metric_value"] = self._metric_or_none(
                 metrics.aggregate, group["task"], predicted.get(key, []))
             group["passed"] = group["rows"] > 0 and group["statuses"]["ok"] == group["rows"]
 

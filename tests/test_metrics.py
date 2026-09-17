@@ -281,6 +281,56 @@ def test_a_blank_reference_still_counts_its_row_in_a_wer_group() -> None:
     print("PASS: a blank-reference row still counts in its WER group.")
 
 
+def test_numbers_are_compared_as_numbers_not_as_digit_runs() -> None:
+    """A thousands separator or a trailing zero must not invent a miss.
+
+    Splitting "1,000" into "1" and "000" made a prediction saying 1000 miss on
+    both, so qa under-reported on any corpus whose answers are formatted.
+    """
+    assert metrics.metric_value(_row("qa", answer="It cost 1,000 dollars."),
+                                "about 1000 dollars") == 1.0
+    assert metrics.metric_value(_row("qa", answer="It took 3.5 seconds."),
+                                "3.50 seconds") == 1.0
+    assert metrics.metric_value(_row("qa", answer="It took 3.5 seconds."),
+                                "3.6 seconds") == 0.0
+    # A different number is still a different number.
+    assert metrics.metric_value(_row("qa", answer="It cost 1,000 dollars."),
+                                "about 100 dollars") == 0.0
+
+    print("PASS: numbers are compared as numbers.")
+
+
+def test_a_failed_metric_load_can_be_retried_in_a_later_run() -> None:
+    """One notebook kernel runs many evaluations; a Hub blip must not end them all."""
+    attempts = []
+
+    def _failing_load(name):
+        attempts.append(name)
+        raise OSError("no route to host")
+
+    original_load, original_metric = metrics.hf_evaluate.load, metrics._wer_metric
+    metrics.hf_evaluate.load, metrics._wer_metric = _failing_load, None
+    try:
+        row = _row("asr", transcription="a dog barks")
+        for _ in range(3):
+            try:
+                metrics.metric_value(row, "a dog barks")
+            except OSError:
+                pass
+        assert len(attempts) == 1, attempts
+
+        metrics.forget_failed_load()
+        try:
+            metrics.metric_value(row, "a dog barks")
+        except OSError:
+            pass
+        assert len(attempts) == 2, attempts
+    finally:
+        metrics.hf_evaluate.load, metrics._wer_metric = original_load, original_metric
+
+    print("PASS: a failed metric load can be retried in a later run.")
+
+
 def test_a_metric_that_will_not_load_is_only_attempted_once() -> None:
     """The load runs per row, so a Hub outage must not cost every row a timeout.
 
