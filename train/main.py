@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json-config", default="configs/clotho_config.json",
                    dest="json_config_path",
                    help="UAD dataset JSON config (default: configs/clotho_config.json)")
-    p.add_argument("--max-samples", type=int, default=None, dest="max_samples",
+    p.add_argument("--clips-per-split", type=int, default=None, dest="clips_per_split",
                    help="Train on only the first N clips of each selected split (useful for smoke tests)")
 
     p.add_argument("--output-dir", default="outputs/finetune", dest="output_dir")
@@ -82,7 +82,7 @@ def main() -> None:
         dataset_name=args.dataset,
         dataset_split=args.dataset_split,
         json_config_path=args.json_config_path,
-        max_samples=args.max_samples,
+        clips_per_split=args.clips_per_split,
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
         per_device_train_batch_size=args.per_device_train_batch_size,
@@ -101,8 +101,7 @@ def main() -> None:
         split=config.dataset_split,
         repo_id=config.dataset_name,
         token=hf_token,
-        # max_samples caps clips per split until it is renamed clips_per_split.
-        clips_per_split=config.max_samples,
+        clips_per_split=config.clips_per_split,
     )
     print(f"Dataset loaded: {len(rows)} rows")
     if not rows:

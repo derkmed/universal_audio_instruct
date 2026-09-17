@@ -49,10 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Threads for parallel audio preprocessing",
     )
     p.add_argument(
-        "--max-samples",
+        "--clips-per-split",
         type=int,
         default=None,
-        dest="max_samples",
+        dest="clips_per_split",
         help="Evaluate only the first N clips of each selected split (useful for debugging)",
     )
     p.add_argument(
@@ -89,7 +89,7 @@ def main() -> None:
         model_path=args.model_path,
         batch_size=args.batch_size,
         num_preprocessing_workers=args.num_preprocessing_workers,
-        max_samples=args.max_samples,
+        clips_per_split=args.clips_per_split,
         max_new_tokens=args.max_new_tokens,
         output_dir=args.output_dir,
         hf_token=hf_token,
@@ -106,8 +106,7 @@ def main() -> None:
         split=config.dataset_split,
         repo_id=config.dataset_name,
         token=hf_token,
-        # max_samples caps clips per split until it is renamed clips_per_split.
-        clips_per_split=config.max_samples,
+        clips_per_split=config.clips_per_split,
     )
     print(f"Dataset loaded: {len(dataset)} rows")
 

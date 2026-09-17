@@ -74,8 +74,8 @@ def _evaluate(**config) -> tuple[list[dict], EchoBackend]:
 
 
 def test_every_loaded_row_is_evaluated() -> None:
-    # max_samples caps clips in the loader; the evaluator must not cut rows again.
-    records, backend = _evaluate(max_samples=1)
+    # clips_per_split caps clips in the loader; the evaluator must not cut rows again.
+    records, backend = _evaluate(clips_per_split=1)
 
     assert backend.seen == 3, backend.seen
     assert len(records) == 3, records

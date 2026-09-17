@@ -69,12 +69,12 @@ pip install -r requirements.txt -r train/requirements.txt
 export HF_TOKEN=...   # the dataset is private; some models are gated
 ```
 
-Smoke test (tiny slice; `max_samples` streams the archive and stops early
+Smoke test (tiny slice; `--clips-per-split` streams the archive and stops early
 instead of downloading the whole tar. Clotho's archive stores its test clips
 first, so reaching the first train clips still reads about 3 GiB):
 
 ```bash
-python -m train.main --model GEMMA-4 --max-samples 32 --epochs 1 --output-dir outputs/smoke
+python -m train.main --model GEMMA-4 --clips-per-split 5 --epochs 1 --output-dir outputs/smoke
 ```
 
 Gemma, LoRA on a bf16 base (recommended Gemma default):
@@ -114,7 +114,7 @@ typically want 1e-5..5e-5.
 | `--dataset` | `AudioInstruct/Universal-Audio-Understanding` | HF Hub dataset repo_id |
 | `--split` | `train` | dataset split |
 | `--json-config` | `configs/clotho_config.json` | UAD config (local path, or name under the dataset repo's `universal_audio_dataset_configs/`) |
-| `--max-samples` | full split | cap on training rows; also enables archive streaming |
+| `--clips-per-split` | every clip | take only the first N clips of each selected split; also enables archive streaming |
 | `--output-dir` | `outputs/finetune` | where adapter/weights + processor are saved |
 | `--epochs` | `1.0` | training epochs |
 | `--batch-size` | `2` | per-device batch size |
@@ -194,7 +194,7 @@ turn. Export the classes from `eval/backends/__init__.py` and
 
 - **Verified by construction, not by GPU run.** The harness compiles, but
   `train/` has no tests, and no end-to-end training step has been run in this
-  environment. Do a `--max-samples 32` smoke run first.
+  environment. Do a `--clips-per-split 5` smoke run first.
 - **Label-mask boundary.** The two-pass recipe assumes the rendered full text
   extends the rendered prompt text and right padding. Both hold for the current
   Gemma/Qwen chat templates; if a template changes, decode a few `labels` rows

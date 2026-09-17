@@ -38,7 +38,7 @@ class EvalConfig:
     num_preprocessing_workers: int = 4  # threads for parallel audio preprocessing
 
     # Evaluation
-    max_samples: Optional[int] = None  # clips per selected split; None = every clip
+    clips_per_split: Optional[int] = None  # first N clips of each selected split; None = every clip
     output_dir: Optional[str] = None   # directory for results.jsonl + summary.json
 
     # Auth
