@@ -16,19 +16,28 @@ DEFAULT_MODEL_PATHS: dict[str, str] = {
 }
 
 
+# Both command lines and the notebook default the seed here, so there is one 42.
+DEFAULT_SEED = 42
+
+
+def validate_clips_per_split(clips_per_split: Optional[int]) -> None:
+    """Reject a cap that asks for no clips at all."""
+    if clips_per_split is not None and clips_per_split < 1:
+        raise ValueError(
+            f"clips_per_split must be a positive integer, got {clips_per_split}.")
+
+
 def resolve_dataset_split(
     dataset_split: Optional[str], *, clips_per_split: Optional[int], uncapped_default: str,
 ) -> str:
-    """Fill in an unset `dataset_split`, and reject a cap below 1.
+    """Fill in an unset or blank `dataset_split`.
 
     Both config classes resolve here, so a command line and the notebook read an
     unset split the same way: a smoke run wants every registered split, and a
     regular run wants the one split its harness is for.
     """
-    if clips_per_split is not None and clips_per_split < 1:
-        raise ValueError(
-            f"clips_per_split must be a positive integer, got {clips_per_split}.")
-    if dataset_split is not None:
+    # A blank string is the notebook's empty form field: no split asked for.
+    if dataset_split:
         return dataset_split
     return "all" if clips_per_split is not None else uncapped_default
 
@@ -58,7 +67,7 @@ class EvalConfig:
 
     # Evaluation
     clips_per_split: Optional[int] = None  # first N clips of each selected split; None = every clip
-    seed: int = 42  # seeds the loader's prompt-template picks
+    seed: int = DEFAULT_SEED  # seeds the loader's prompt-template picks
     output_dir: Optional[str] = None   # directory for results.jsonl + summary.json
 
     # Auth
@@ -69,8 +78,14 @@ class EvalConfig:
     max_audio_seconds: int = 30
 
     def __post_init__(self):
+        validate_clips_per_split(self.clips_per_split)
         self.dataset_split = resolve_dataset_split(
             self.dataset_split, clips_per_split=self.clips_per_split, uncapped_default="test")
+
+    @property
+    def is_smoke_run(self) -> bool:
+        """Whether this run caps clips per split, and so tolerates load failures."""
+        return self.clips_per_split is not None
 
     @property
     def resolved_model_path(self) -> str:

@@ -332,7 +332,7 @@ def test_a_split_short_of_the_cap_gets_a_warning() -> None:
 
 
 def test_has_problems_flags_what_fails_a_smoke_run() -> None:
-    """The one rule both main() functions map to an exit status."""
+    """The one rule a smoke run maps to an exit status."""
     ok = LoadReport(clips_per_split=3, splits=[
         SplitReport("Clotho", "train", ["caption"], clips_found=3)])
     assert not ok.has_problems, ok

@@ -2,7 +2,7 @@
 
 Run from the repo root as a module:
 
-    python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json --split test
+    python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json
 
 Flow: parse flags into an `EvalConfig`, build the chosen model backend, load the
 requested dataset slice via `uad_data.load_uad_dataset` (which fetches audio +
@@ -14,7 +14,7 @@ import argparse
 import os
 
 from .backends import GemmaBackend, QwenBackend
-from .config import DEFAULT_MODEL_PATHS, EvalConfig
+from .config import DEFAULT_MODEL_PATHS, DEFAULT_SEED, EvalConfig
 from .evaluator import Evaluator
 from uad_data import load_uad_dataset
 
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=DEFAULT_SEED,
         dest="seed",
         help="Seeds the prompt-template picks, so a clip keeps its template across runs",
     )

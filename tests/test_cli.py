@@ -77,6 +77,11 @@ def test_dataset_split_resolves_from_the_cap() -> None:
             model_choice="GEMMA-4", clips_per_split=5, dataset_split="validation")
         assert config.dataset_split == "validation", config_cls.__name__
 
+    # A blank notebook field is no split at all, not the split "".
+    for config_cls in (EvalConfig, TrainConfig):
+        config = config_cls(model_choice="GEMMA-4", clips_per_split=5, dataset_split="")
+        assert config.dataset_split == "all", config_cls.__name__
+
     print("PASS: dataset_split defaults to all for a smoke run, and explicit wins.")
 
 
