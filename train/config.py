@@ -22,7 +22,7 @@ class TrainConfig:
     dataset_name: str = "AudioInstruct/Universal-Audio-Understanding"  # HF Hub repo_id
     dataset_split: str = "train"
     json_config_path: str = "configs/clotho_config.json"
-    max_samples: Optional[int] = None  # None = full split
+    max_samples: Optional[int] = None  # clips per selected split; None = every clip
 
     # Model
     model_path: Optional[str] = None  # overrides DEFAULT_MODEL_PATHS if set

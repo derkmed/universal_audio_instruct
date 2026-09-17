@@ -70,12 +70,13 @@ from uad_data import load_uad_dataset
 
 rows = load_uad_dataset(
     json_config_path="configs/clotho_config.json",   # local path or a name under the repo's universal_audio_dataset_configs/
-    split="test",
+    split="test",             # or "validation+test", or "all" (every split the config lists)
     repo_id="AudioInstruct/Universal-Audio-Understanding",
     token="hf_...",           # private dataset
-    max_samples=None,         # cap the number of rows; stops iterating early
-    # stream=None,            # lazily stream archives (auto-on when max_samples set) so a
-    #                         # small cap downloads only the archive prefix, not the whole tar
+    clips_per_split=None,     # take only the first N clips of each split; stops reading early
+    seed=42,                  # fixes each row's pick when the config randomizes templates
+    # stream=None,            # lazily stream archives (auto-on when clips_per_split is set)
+    #                         # so a small cap downloads only the archive prefix, not the whole tar
 )
 # each row: audio ({"path", "bytes"}), audio_path, system_instruction, prompt, output,
 # task, originating_dataset, split, plus every field of the clip's metadata record
