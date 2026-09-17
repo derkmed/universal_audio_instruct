@@ -5,15 +5,17 @@ real `uad_data` code (config validation, metadata loading, prompt matching,
 `Sample.to_output`) against a LOCAL copy of the Hub dataset repo, plus a full
 pass over every audio archive's entry list.
 
-Known limitation (issue #20): this script predates per-utterance rendering (#14)
-and does not handle asr_timestamp_search, so don't trust its output for
-libricss, libricss_subseg or SparseLibriMix. It imports `uad_data` from the
-checkout it sits in, and from #14 on it misreports those datasets in two ways:
-  * it builds `Sample` without an `utterance_index`, so every
-    asr_timestamp_search row counts as a render error;
+Known limitation (issue #20): this script does not handle asr_timestamp_search,
+whose fields live in each utterance of a clip's `transcriptions` list. Don't
+trust its output for the internal datasets libricss, libricss_subseg or
+SparseLibriMix. It imports `uad_data` from the checkout it sits in. On any
+checkout, including commit 8f0b6f9, it misreports those datasets in two ways:
   * `vars_not_in_features` compares template variables with `Task.features`
-    keys, so it flags `start_time`, `end_time` and `transcription`, which are
-    utterance fields.
+    keys, so it flags `start_time`, `end_time` and `transcription`;
+  * the field check counts `transcriptions:list` under `non_string_values`.
+From per-utterance rendering (PR #14) on, it also builds `Sample` without an
+`utterance_index`, so every (row, template) pair counts as a render error.
+Before PR #14, those rows rendered with blank utterance fields.
 complete-1..5 don't use these datasets, so the default run is unaffected.
 
 Standard library only. `uad_data` imports three third-party packages that are

@@ -486,8 +486,8 @@ slice assumes the ones before it.
   raises a `ValueError` naming `row_filter`.
 - Pin `docs/research/complete-configs-load-check.py` to commit `8f0b6f9` with a
   header note; don't change its code. Keep the header's existing note ([#20])
-  that the script predates per-utterance rendering and doesn't handle
-  asr_timestamp_search.
+  that the script doesn't handle asr_timestamp_search, even when run against
+  `uad_data` at `8f0b6f9`.
 - In `MIGRATION.md`, rename `sample.py` to `row.py` in the module list, and add
   "(now `Row`)" where the history mentions `Sample`.
 
