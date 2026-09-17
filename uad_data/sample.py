@@ -22,7 +22,9 @@ class Sample:
     prompt_template: io_templates.PromptTemplate | None = None
     output_template: io_templates.OutputTemplate | None = None
     # Which utterance in `metadata['transcriptions']` this row renders
-    # (asr_timestamp_search only; see `Task.utterance_indices`).
+    # (asr_timestamp_search only; see `Task.utterance_indices`). Rendering
+    # raises ValueError if it isn't a valid index there, or isn't None for any
+    # other task (see `Task.render_context`).
     utterance_index: int | None = None
 
     def __post_init__(self):
