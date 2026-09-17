@@ -272,6 +272,52 @@ def test_a_backend_returning_anything_but_strings_fails_its_batch() -> None:
     print("PASS: a backend returning anything but strings fails its batch.")
 
 
+def test_an_unavailable_metric_is_complained_about_once_per_run() -> None:
+    """Otherwise a down Hub buries the GT/Pred output the run exists to produce."""
+    import contextlib
+    import io as _io
+
+    from eval import metrics as metrics_module
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("metric unavailable")
+
+    original = metrics_module.metric_value, metrics_module.aggregate
+    metrics_module.metric_value, metrics_module.aggregate = _boom, _boom
+    chatter = _io.StringIO()
+    try:
+        with contextlib.redirect_stdout(chatter):
+            _run(list(ROWS), clips_per_split=1)
+    finally:
+        metrics_module.metric_value, metrics_module.aggregate = original
+
+    complaints = [line for line in chatter.getvalue().splitlines()
+                  if "metric unavailable" in line]
+    assert len(complaints) == 1, complaints
+
+    print("PASS: an unavailable metric is complained about once, not per row.")
+
+
+def test_a_render_failure_keeps_the_utterance_it_failed_on() -> None:
+    """One clip renders one row per utterance, so the index is what tells them apart."""
+    rows = LoadedRows([], LoadReport(
+        clips_per_split=1,
+        splits=[SplitReport("MELD", "test", ["asr_timestamp_search"], clips_found=1)],
+        render_failures=[
+            RenderFailure("MELD", "test", "asr_timestamp_search", "test/d0.wav",
+                          "KeyError: 'transcription'", utterance_index=0),
+            RenderFailure("MELD", "test", "asr_timestamp_search", "test/d0.wav",
+                          "KeyError: 'transcription'", utterance_index=3),
+        ],
+    ))
+
+    _, records, _, _ = _run(rows, clips_per_split=1)
+
+    assert [r["utterance_index"] for r in records] == [0, 3], records
+
+    print("PASS: a render failure records the utterance it failed on.")
+
+
 def test_a_row_that_failed_to_render_is_reported_from_the_load_report() -> None:
     rows = LoadedRows([ROWS[0]], LoadReport(
         clips_per_split=1,

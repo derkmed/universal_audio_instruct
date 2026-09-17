@@ -40,7 +40,7 @@ flowchart TD
 | `main.py` | CLI entry point; wires config → loader → backend → evaluator |
 | `config.py` | `EvalConfig` + `DEFAULT_MODEL_PATHS` (registry shared with `train/`) |
 | `evaluator.py` | batch loop: threaded audio decoding, then one batched generate call per batch; incremental `results.jsonl`; a status for every row, then per-group pass/fail and metrics |
-| `metrics.py` | the one preliminary metric each task reports: WER for `asr`, `english_translation` and `caption`, a hit rate for `classification`, `commonsense` and `qa` |
+| `metrics.py` | the one preliminary metric each task reports, and the rule behind it; the module docstring holds the table |
 | `backends/base.py` | `ModelBackend` ABC + `InferenceRequest` |
 | `backends/gemma.py` | Gemma: audio arrays in chat messages, batched `processor(text, audio)` |
 | `backends/qwen.py` | Qwen3-Omni: raw audio bytes in temp files + `process_mm_info`, batched processing |
