@@ -56,12 +56,14 @@ def print_group_table(summary: dict) -> None:
     header = "Group results" + (f" (clips per split: {cap})" if cap is not None else "")
     print(f"\n{header}")
 
-    columns = ["group", "clips", "rows", *STATUSES, "metric", "result"]
+    # `split clips`, not `clips`: the count belongs to the whole split, so every
+    # task group of one split repeats it rather than each finding that many.
+    columns = ["group", "split clips", "rows", *STATUSES, "metric", "result"]
     lines = [columns]
     for group in summary["groups"]:
-        found = group["clips_found"]
+        found, group_cap = group["clips_found"], group["clips_per_split"]
         clips = "-" if found is None else (
-            str(found) if cap is None else f"{found}/{cap}")
+            str(found) if group_cap is None else f"{found}/{group_cap}")
         value = group["metric_value"]
         metric = "-" if group["metric"] is None or value is None else (
             f"{group['metric']} {value:.4f}")

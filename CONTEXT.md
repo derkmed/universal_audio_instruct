@@ -76,5 +76,9 @@ The rows of one evaluation run that share an internal dataset, split and task. A
 _Avoid_: bucket, slice
 
 **Preliminary metric**:
-The one rough metric an evaluation run reports for each task: WER for asr, english_translation and caption, and a hit rate for the rest. It is for information only and never decides whether a group passes.
+The one rough metric an evaluation run reports for each task: WER for asr, english_translation and caption, and a hit rate for classification, commonsense and qa. Those six are the tasks the complete-1..5 run configs use; any other task has no preliminary metric and reports nothing. It is for information only and never decides whether a group passes.
 _Avoid_: score, accuracy
+
+**Answer field**:
+The plain metadata field a task's preliminary metric reads a row against — a caption's `caption`, a qa row's `answer` — as opposed to the rendered `output`, which wraps that answer in template prose. A row whose answer field leaves its rule nothing to compare (a `commonsense_answer` with no leading choice letter, a `qa` answer with no numbers) has no metric value and is left out of its group's hit rate.
+_Avoid_: reference (a WER reference is one answer field, not all of them), label
