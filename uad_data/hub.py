@@ -62,7 +62,7 @@ def open_archive_stream(
     this returns an `HfFileSystem` file object that only transfers the bytes that
     are actually read. Feeding it to `tarfile.open(fileobj=..., mode="r|gz")` and
     stopping early therefore downloads just the compressed prefix of the archive --
-    useful with `max_samples`. Trade-off: nothing is cached, so full/repeat reads
+    useful with `clips_per_split`. Trade-off: nothing is cached, so full/repeat reads
     are better served by `download_file`.
     """
     from huggingface_hub import HfFileSystem

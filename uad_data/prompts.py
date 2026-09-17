@@ -101,12 +101,12 @@ class PromptFilepath:
         combos = list(itertools.product(si_templates, p_templates, o_templates))
         return [(si, p, o) for si, p, o in combos if si is not None or p is not None]
 
-    def random_template_selection(self) -> tuple[
+    def random_template_selection(self, rng: random.Random) -> tuple[
         io_templates.SystemInstructionTemplate | None,
         io_templates.PromptTemplate | None,
         io_templates.OutputTemplate | None
     ]:
-        return random.choice(self.all_templates)
+        return rng.choice(self.all_templates)
 
     def accepts_task(self, task: tasks_lib.Task) -> bool:
         return self.data[TASK_COLUMN] == task.value
