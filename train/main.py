@@ -117,7 +117,9 @@ def main() -> None:
         per_device_train_batch_size=config.per_device_train_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
-        warmup_ratio=config.warmup_ratio,
+        # transformers 5.15 removed `warmup_ratio`; since 5.5, a float in
+        # [0, 1) passed as `warmup_steps` is read as a ratio of total steps.
+        warmup_steps=config.warmup_ratio,
         logging_steps=config.logging_steps,
         save_steps=config.save_steps,
         seed=config.seed,
