@@ -69,7 +69,13 @@ def test_smoke_run_records_render_failures_and_still_counts_the_clip() -> None:
     assert "category" in failure.error, failure.error
     assert rows.report.splits[0].clips_found == 2, rows.report.splits
 
-    print("PASS: a smoke run records a render failure and still counts its clip.")
+    with _Warnings() as caught:
+        fx._load(_emns_without_category("emns/0.wav"), EMNS_CONFIG,
+                 split="train", clips_per_split=2)
+    assert any("emns/0.wav" in m and "classification" in m and "category" in m
+               for m in caught.messages), caught.messages
+
+    print("PASS: a smoke run records and logs a render failure and still counts its clip.")
 
 
 def test_smoke_run_records_a_task_with_no_prompt_file_as_render_failures() -> None:
@@ -114,6 +120,35 @@ def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_file() -
     assert rows.report.splits[0].clips_found == 2, rows.report.splits
 
     print("PASS: a clip the row filter drops neither counts nor fails to render.")
+
+
+def test_regular_run_raises_on_a_task_with_no_prompt_file_even_if_filtered() -> None:
+    # The random filter rejects about half the rows, so a regular run must raise
+    # before it asks the filter.
+    config = {"name": "Clotho", "row_filter": "random", "datasets": [
+        {"name": "Clotho", "tasks": ["commonsense"], "splits": ["test"]}]}
+    try:
+        rows, _ = fx._load(fx.CLOTHO, config, split="test")
+    except RuntimeError as e:
+        assert "commonsense" in str(e).lower(), e
+    else:
+        raise AssertionError(f"expected RuntimeError, got {len(rows)} rows")
+
+    class _Raising(fx.filters.RowFilter):
+        def include_row(self, row) -> bool:
+            raise AssertionError("the filter ran before the template error")
+
+    fx.filters.FILTER_REGISTRY["raising"] = _Raising
+    try:
+        fx._load(fx.CLOTHO, {**config, "row_filter": "raising"}, split="test")
+    except RuntimeError as e:
+        assert "commonsense" in str(e).lower(), e
+    else:
+        raise AssertionError("expected RuntimeError")
+    finally:
+        del fx.filters.FILTER_REGISTRY["raising"]
+
+    print("PASS: a regular run raises on a missing prompt file before the filter runs.")
 
 
 def test_regular_run_raises_on_a_render_failure() -> None:
@@ -206,7 +241,7 @@ def test_smoke_run_records_a_missing_metadata_file_and_moves_on() -> None:
 
 def test_regular_run_raises_on_a_truncated_archive_or_missing_metadata() -> None:
     for broken, expected in [
-        ({"truncate": {"EMNS.tar.gz": 0.6}}, Exception),
+        ({"truncate": {"EMNS.tar.gz": 0.6}}, fx.tarfile.ReadError),
         ({"missing": {"EMNS_train.json"}}, FileNotFoundError),
     ]:
         try:

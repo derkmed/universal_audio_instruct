@@ -245,11 +245,16 @@ def _rows_until_failure(
                 dataset, rows_kept, error)
             report.load_failures.append(LoadFailure(
                 dataset=dataset,
-                error=f"{type(error).__name__}: {error}",
+                error=_describe(error),
                 rows_kept=rows_kept))
             break
         yield row
         rows_kept += 1
+
+
+def _describe(error: Exception) -> str:
+    """An error as the load report records it."""
+    return f"{type(error).__name__}: {error}"
 
 
 def _dataset_rows(
@@ -346,10 +351,15 @@ def _clip_rows(
     def failed(task: Task, utterance_index: int | None, error: Exception) -> None:
         if render_failures is None:
             raise error
-        render_failures.append(RenderFailure(
+        failure = RenderFailure(
             dataset=internal_dataset.name, split=split, task=task.value,
-            audio_path=audio_path, error=f"{type(error).__name__}: {error}",
-            utterance_index=utterance_index))
+            audio_path=audio_path, error=_describe(error),
+            utterance_index=utterance_index)
+        logger.warning(
+            "Failed to render a %s %s %s row for %s (utterance %s); moving on: %s",
+            failure.dataset, failure.split, failure.task, failure.audio_path,
+            failure.utterance_index, failure.error)
+        render_failures.append(failure)
 
     for task in record["tasks"]:
         # One pass per utterance for asr_timestamp_search, one pass otherwise.
@@ -360,6 +370,8 @@ def _clip_rows(
             try:
                 templates = _get_prompt_templates(task, rng)
             except Exception as error:
+                if render_failures is None:
+                    raise
                 # With no template to render, ask the filter about a blank one.
                 placeholder = Row(
                     audio_path=audio_path, dataset_name=internal_dataset.name,
