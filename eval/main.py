@@ -73,8 +73,21 @@ def build_parser() -> argparse.ArgumentParser:
         dest="hf_token",
         help="HuggingFace token (falls back to HF_TOKEN env var)",
     )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        dest="seed",
+        help="Seeds the prompt-template picks, so a clip keeps its template across runs",
+    )
     p.add_argument("--dataset", default="AudioInstruct/Universal-Audio-Understanding")
-    p.add_argument("--split", default="test", dest="dataset_split")
+    p.add_argument(
+        "--split",
+        default=None,
+        dest="dataset_split",
+        help="Splits to load: one name, several joined with '+', or 'all' "
+             "(default: all for a smoke run, test otherwise)",
+    )
     return p
 
 
@@ -90,6 +103,7 @@ def main() -> None:
         batch_size=args.batch_size,
         num_preprocessing_workers=args.num_preprocessing_workers,
         clips_per_split=args.clips_per_split,
+        seed=args.seed,
         max_new_tokens=args.max_new_tokens,
         output_dir=args.output_dir,
         hf_token=hf_token,
@@ -107,6 +121,7 @@ def main() -> None:
         repo_id=config.dataset_name,
         token=hf_token,
         clips_per_split=config.clips_per_split,
+        seed=config.seed,
     )
     print(f"Dataset loaded: {len(dataset)} rows")
 

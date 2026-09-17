@@ -19,6 +19,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import test_loader_splits as fx  # noqa: E402
 
+from uad_data.load_report import (  # noqa: E402
+    LoadFailure, LoadReport, RenderFailure, SplitReport)
+
 
 def test_rows_are_a_list_with_a_report_of_clips_per_split() -> None:
     config = {"name": "Clotho", "datasets": [
@@ -326,6 +329,61 @@ def test_a_split_short_of_the_cap_gets_a_warning() -> None:
                if "Failed to load" not in m), caught.messages
 
     print("PASS: a split with fewer clips than the cap logs a warning.")
+
+
+def test_has_problems_flags_what_fails_a_smoke_run() -> None:
+    """The one rule both main() functions map to an exit status."""
+    ok = LoadReport(clips_per_split=3, splits=[
+        SplitReport("Clotho", "train", ["caption"], clips_found=3)])
+    assert not ok.has_problems, ok
+
+    short = LoadReport(clips_per_split=3, splits=[
+        SplitReport("Clotho", "train", ["caption"], clips_found=1)])
+    assert not short.has_problems, "a shortfall is only a warning"
+
+    empty = LoadReport(clips_per_split=3, splits=[
+        SplitReport("Clotho", "train", ["caption"], clips_found=0)])
+    assert empty.has_problems, empty
+
+    failed = LoadReport(clips_per_split=3, splits=ok.splits, load_failures=[
+        LoadFailure("EMNS", "missing metadata", rows_kept=0)])
+    assert failed.has_problems, failed
+
+    unrendered = LoadReport(clips_per_split=3, splits=ok.splits, render_failures=[
+        RenderFailure("EMNS", "train", "emotion", "emns/0.wav", "no category")])
+    assert unrendered.has_problems, unrendered
+
+    print("PASS: has_problems flags failed loads, render failures and zero-clip splits.")
+
+
+def test_describe_lists_every_split_and_failure() -> None:
+    """What train.main prints before training starts."""
+    report = LoadReport(
+        clips_per_split=3,
+        splits=[SplitReport("Clotho", "train", ["caption"], clips_found=3),
+                SplitReport("Clotho", "test", ["caption"], clips_found=1),
+                SplitReport("EMNS", "train", ["emotion"], clips_found=0)],
+        load_failures=[LoadFailure("EMNS", "EMNS_train.json is missing", rows_kept=0)],
+        render_failures=[
+            RenderFailure("EMNS", "train", "emotion", "emns/0.wav", "no category")])
+    text = report.describe()
+
+    assert "clips per split: 3" in text, text
+    # Each selected split, with the cap named only where the split fell short.
+    assert "Clotho/train: 3 clips" in text, text
+    assert "Clotho/test: 1 clip of 3" in text, text
+    assert "EMNS/train: 0 clips of 3" in text, text
+    assert "caption" in text and "emotion" in text, text
+    # Both kinds of failure, with their reasons.
+    assert "EMNS_train.json is missing" in text, text
+    assert "0 rows kept" in text, text
+    assert "emns/0.wav" in text and "no category" in text, text
+
+    uncapped = LoadReport(splits=[SplitReport("Clotho", "test", ["caption"], clips_found=9)])
+    assert "clips per split" not in uncapped.describe(), uncapped.describe()
+    assert "Clotho/test: 9 clips" in uncapped.describe(), uncapped.describe()
+
+    print("PASS: describe lists every selected split, shortfall and failure.")
 
 
 if __name__ == "__main__":

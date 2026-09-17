@@ -16,6 +16,23 @@ DEFAULT_MODEL_PATHS: dict[str, str] = {
 }
 
 
+def resolve_dataset_split(
+    dataset_split: Optional[str], *, clips_per_split: Optional[int], uncapped_default: str,
+) -> str:
+    """Fill in an unset `dataset_split`, and reject a cap below 1.
+
+    Both config classes resolve here, so a command line and the notebook read an
+    unset split the same way: a smoke run wants every registered split, and a
+    regular run wants the one split its harness is for.
+    """
+    if clips_per_split is not None and clips_per_split < 1:
+        raise ValueError(
+            f"clips_per_split must be a positive integer, got {clips_per_split}.")
+    if dataset_split is not None:
+        return dataset_split
+    return "all" if clips_per_split is not None else uncapped_default
+
+
 @dataclass
 class EvalConfig:
     """All knobs for one evaluation run (model, dataset slice, batching, output)."""
@@ -24,7 +41,9 @@ class EvalConfig:
 
     # Dataset
     dataset_name: str = "AudioInstruct/Universal-Audio-Understanding"  # HF Hub repo_id passed to the loader
-    dataset_split: str = "test"
+    # The splits to load, written the HuggingFace way: one name, several joined
+    # with "+", or "all". Unset resolves in __post_init__.
+    dataset_split: Optional[str] = None
     # Local path to a UAD JSON config, or the name of one hosted in the repo's
     # universal_audio_dataset_configs/ folder (see uad_data.loader).
     json_config_path: str = "configs/clotho_config.json"
@@ -39,6 +58,7 @@ class EvalConfig:
 
     # Evaluation
     clips_per_split: Optional[int] = None  # first N clips of each selected split; None = every clip
+    seed: int = 42  # seeds the loader's prompt-template picks
     output_dir: Optional[str] = None   # directory for results.jsonl + summary.json
 
     # Auth
@@ -47,6 +67,10 @@ class EvalConfig:
     # Audio preprocessing
     target_sr: int = 16_000
     max_audio_seconds: int = 30
+
+    def __post_init__(self):
+        self.dataset_split = resolve_dataset_split(
+            self.dataset_split, clips_per_split=self.clips_per_split, uncapped_default="test")
 
     @property
     def resolved_model_path(self) -> str:
