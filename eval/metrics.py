@@ -74,9 +74,13 @@ _CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])(?!\w)")
 _WORD_LETTERS = frozenset("ai")
 _MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])\s*(?:[^\w\s]|$)")
 
-# Loaded lazily and kept, because `evaluate.load` reads from disk on every call:
-# the loaded metric, or the exception that loading it raised.
+# Loaded lazily and kept, because `evaluate.load` reads from disk on every call.
 _wer_metric = None
+# Why it would not load, remembered for the rest of this run. The reason and not
+# the exception: re-raising one exception object appends a frame to its
+# traceback every time, and those frames keep each row's locals alive -- audio
+# bytes included -- for as long as the object is reachable from this module.
+_wer_load_error: Optional[str] = None
 
 
 def _normalise(text: str) -> str:
@@ -244,23 +248,23 @@ def forget_failed_load() -> None:
     cost every later run its numbers too. `Evaluator.evaluate` calls this as it
     starts.
     """
-    global _wer_metric
-    if isinstance(_wer_metric, BaseException):
-        _wer_metric = None
+    global _wer_load_error
+    _wer_load_error = None
 
 
 def _wer(*, predictions: list[str], references: list[str]) -> float:
     """Corpus WER. An empty prediction is every reference word deleted: WER 1.0."""
-    global _wer_metric
+    global _wer_metric, _wer_load_error
+    # Remembered, because this runs once per row: retrying a Hub that is down
+    # would cost every row of the run its own timeout. A fresh exception each
+    # time, so nothing accumulates a traceback across the run.
+    if _wer_load_error is not None:
+        raise RuntimeError(_wer_load_error) from None
     if _wer_metric is None:
         try:
             _wer_metric = hf_evaluate.load(WER)
         except Exception as error:
-            # Remember the failure. This runs once per row, so retrying a Hub
-            # that is down would cost every row of the run its own timeout and
-            # its own identical complaint.
-            _wer_metric = error
+            _wer_load_error = (
+                f"could not load the {WER} metric: {type(error).__name__}: {error}")
             raise
-    if isinstance(_wer_metric, BaseException):
-        raise _wer_metric
     return float(_wer_metric.compute(predictions=predictions, references=references))
