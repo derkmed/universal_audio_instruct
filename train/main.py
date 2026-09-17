@@ -21,7 +21,7 @@ from transformers import Trainer, TrainingArguments
 
 from uad_data import load_uad_dataset
 from .backends import GemmaTrainBackend, QwenTrainBackend
-from .config import DEFAULT_MODEL_PATHS, TrainConfig
+from .config import DEFAULT_MODEL_PATHS, DEFAULT_SEED, TrainConfig
 
 
 class RowDataset(Dataset):
@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="UAD dataset JSON config (default: configs/clotho_config.json)")
     p.add_argument("--clips-per-split", type=int, default=None, dest="clips_per_split",
                    help="Train on only the first N clips of each selected split (for smoke runs)")
-    p.add_argument("--seed", type=int, default=42, dest="seed",
+    p.add_argument("--seed", type=int, default=DEFAULT_SEED, dest="seed",
                    help="Seeds the Trainer and the prompt-template picks")
 
     p.add_argument("--output-dir", default="outputs/finetune", dest="output_dir")
@@ -113,10 +113,14 @@ def main() -> None:
     report = rows.report
     print(report.describe())
     if not rows:
-        raise SystemExit("No rows produced — check the config/split.")
+        # With no rows there is nothing to save, so this stands in for the
+        # end-of-run exit below. The report says which of the two it is.
+        raise SystemExit(
+            "No rows produced. See the load report above."
+            if report.has_problems
+            else "No rows produced — check the config/split.")
 
-    smoke_run = config.clips_per_split is not None
-    if not smoke_run and any(split.split == "test" for split in report.splits):
+    if not config.is_smoke_run and any(split.split == "test" for split in report.splits):
         print("\n*** WARNING: the selected splits include test. Training on the "
               "test split invalidates every evaluation on it. ***\n")
 
@@ -159,7 +163,7 @@ def main() -> None:
 
     # A smoke run is a check, so its exit status reports what the load found:
     # a failed internal dataset, a row that wouldn't render, or an empty split.
-    if smoke_run and report.has_problems:
+    if config.is_smoke_run and report.has_problems:
         raise SystemExit(
             "Smoke run finished with problems in the load report:\n"
             + report.describe())

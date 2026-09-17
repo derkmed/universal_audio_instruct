@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Same model registry as eval so --model means the same thing in both harnesses.
-from eval.config import DEFAULT_MODEL_PATHS, resolve_dataset_split
+from eval.config import (
+    DEFAULT_MODEL_PATHS, DEFAULT_SEED, resolve_dataset_split, validate_clips_per_split)
 
 
 @dataclass
@@ -58,12 +59,18 @@ class TrainConfig:
     logging_steps: int = 10
     save_steps: int = 200
     gradient_checkpointing: bool = True
-    seed: int = 42  # seeds the Trainer and the loader's prompt-template picks
+    seed: int = DEFAULT_SEED  # seeds the Trainer and the loader's prompt-template picks
 
     # Auth
     hf_token: Optional[str] = None
 
+    @property
+    def is_smoke_run(self) -> bool:
+        """Whether this run caps clips per split, and so tolerates load failures."""
+        return self.clips_per_split is not None
+
     def __post_init__(self):
+        validate_clips_per_split(self.clips_per_split)
         self.dataset_split = resolve_dataset_split(
             self.dataset_split, clips_per_split=self.clips_per_split, uncapped_default="train")
         if self.load_in_4bit and not self.use_lora:

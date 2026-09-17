@@ -70,7 +70,7 @@ class Evaluator:
                     all_references.extend(r.ground_truth for r in requests)
 
                     start_idx = len(all_predictions) - len(predictions)
-                    for i, (req, pred) in enumerate(zip(requests, predictions)):
+                    for i, (row, req, pred) in enumerate(zip(batch, requests, predictions)):
                         n = start_idx + i + 1
                         print(f"[{n:>{len(str(total))}}/{total}] GT:   {req.ground_truth}")
                         print(f"{' ' * (len(str(total)) * 2 + 4)}Pred: {pred}")
@@ -80,7 +80,9 @@ class Evaluator:
                                 "model_choice": self.config.model_choice,
                                 "model": self.config.resolved_model_path,
                                 "dataset": self.config.dataset_name,
-                                "split": self.config.dataset_split,
+                                # The row's own split, not the run's: a smoke run
+                                # asks for "all", which would label every row alike.
+                                "split": row["split"],
                                 "task": req.task,
                                 "sys_inst": req.sys_inst,
                                 "prompt": req.prompt_text,

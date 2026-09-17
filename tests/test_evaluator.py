@@ -57,8 +57,8 @@ class EchoBackend(ModelBackend):
 
 ROWS = [
     _row("test/t2.wav", "test", "a cat meows"),
-    _row("test/t0.wav", "test", "a dog barks"),
-    _row("test/t1.wav", "test", "rain falls"),
+    _row("train/t0.wav", "train", "a dog barks"),
+    _row("validation/t1.wav", "validation", "rain falls"),
 ]
 
 
@@ -83,5 +83,16 @@ def test_every_loaded_row_is_evaluated() -> None:
     print("PASS: the evaluator evaluates every row it is given.")
 
 
+def test_each_record_keeps_its_own_row_split() -> None:
+    """A smoke run asks for every split, so a run-level split would mislabel rows."""
+    records, _ = _evaluate(clips_per_split=1)
+
+    assert [r["split"] for r in records] == ["test", "train", "validation"], records
+
+    print("PASS: results.jsonl records each row's own split.")
+
+
 if __name__ == "__main__":
-    test_every_loaded_row_is_evaluated()
+    for _name, _test in list(globals().items()):
+        if _name.startswith("test_"):
+            _test()
