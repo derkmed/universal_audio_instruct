@@ -10,7 +10,7 @@ import datasets
 from .internal_dataset import InternalDataset
 from .tasks import Task
 
-# All Datasets in alphabetical order.
+# All datasets, in case-insensitive alphabetical order.
 LIBRICSS_DESCRIPTION = '''Continuous speech separation (CSS) is an approach tohandling overlapped
 speech in conversational audio signals. A real recorded dataset, called LibriCSS, is derived from
 LibriSpeech by concatenating the corpus utterances to simulate a conversation and capturing the
@@ -74,15 +74,6 @@ DATASETS = [
         data_url='data/EMNS/EMNS.tar.gz'
     ),
     InternalDataset(
-        name='Ewe_BibleTTS',
-        description=(
-            'High fidelity speech corpus in Ewe from BibleTTS.\nhttps://www.openslr.org/129/'
-        ),
-        tasks=[Task.ASR],
-        splits=[datasets.Split.TRAIN],
-        data_url='data/Ewe_BibleTTS/Ewe_BibleTTS.tar.gz'
-    ),
-    InternalDataset(
         name='esc50',
         description=(
             'The ESC-50 dataset is a labeled collection of 2000 environmental audio recordings '
@@ -92,6 +83,15 @@ DATASETS = [
         splits=[datasets.Split.TRAIN, datasets.Split.TEST,
                 datasets.Split.VALIDATION],
         data_url='data/esc50/esc50.tar.gz'
+    ),
+    InternalDataset(
+        name='Ewe_BibleTTS',
+        description=(
+            'High fidelity speech corpus in Ewe from BibleTTS.\nhttps://www.openslr.org/129/'
+        ),
+        tasks=[Task.ASR],
+        splits=[datasets.Split.TRAIN],
+        data_url='data/Ewe_BibleTTS/Ewe_BibleTTS.tar.gz'
     ),
     InternalDataset(
         name='hi_kia',

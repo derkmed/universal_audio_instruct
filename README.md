@@ -76,7 +76,9 @@ rows = load_uad_dataset(
     # stream=None,            # lazily stream archives (auto-on when max_samples set) so a
     #                         # small cap downloads only the archive prefix, not the whole tar
 )
-# each row: audio (bytes), system_instruction, prompt, output, task, originating_dataset, split
+# each row: audio ({"path", "bytes"}), audio_path, system_instruction, prompt, output,
+# task, originating_dataset, split, plus every field of the clip's metadata record
+# and a `tasks` list
 ```
 
 ## Finetuning
@@ -113,7 +115,7 @@ For a dataset called `MyDataset`:
    per split. Each `audio_path` in the metadata must match an archive member path
    exactly, and each record must include every field from step 1.
 3. **Register it** in [`uad_data/internal_datasets.py`](./uad_data/internal_datasets.py),
-   keeping `DATASETS` in alphabetical order:
+   keeping `DATASETS` in case-insensitive alphabetical order:
 
    ```python
    InternalDataset(
@@ -132,18 +134,19 @@ For a dataset called `MyDataset`:
    is required. If you leave out `splits`, the config uses every registered
    split. To let others load the config by name, also upload it to the Hub's
    `universal_audio_dataset_configs/`.
-5. **Test it**, then commit the registry entry and config. The offline test
-   catches mistakes in the registry file. The smoke test runs against the Hub,
+5. **Test it**, then commit the registry entry and config. The offline tests
+   don't read your data, but they import the registry, so they catch syntax
+   errors in it. The smoke test runs against the Hub,
    and `--max-samples` makes it stream the archive and stop early, so it
    downloads only the first part of the archive:
 
    ```bash
-   python tests/test_loader.py
+   python -m pytest tests
    python -m eval.main --model GEMMA-4 --json-config configs/mydataset_config.json --split test --max-samples 5
    ```
 
-   Note that the evaluator currently reports WER for every task, including
-   non-transcription tasks.
+   Note that the evaluator currently computes a single WER over all rows,
+   whatever their task.
 
 | Symptom | Likely cause |
 | --- | --- |
@@ -157,5 +160,5 @@ For a dataset called `MyDataset`:
 ## Tests
 
 ```bash
-python tests/test_loader.py        # offline; needs datasets, jinja2, huggingface_hub
+python -m pytest tests    # offline; needs pytest, datasets, jinja2, huggingface_hub
 ```

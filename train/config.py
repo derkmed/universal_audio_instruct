@@ -27,7 +27,8 @@ class TrainConfig:
     # Model
     model_path: Optional[str] = None  # overrides DEFAULT_MODEL_PATHS if set
 
-    # Audio preprocessing (must match eval so train/eval see identical inputs)
+    # Audio preprocessing for Gemma (must match eval so train/eval see identical
+    # inputs). The Qwen backend reads raw audio bytes and ignores these.
     target_sr: int = 16_000
     max_audio_seconds: int = 30
 

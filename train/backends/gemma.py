@@ -1,9 +1,11 @@
 """Gemma training backend.
 
-Mirrors `eval.backends.gemma.GemmaBackend`'s batched path exactly -- messages
-with an audio content part, `apply_chat_template(tokenize=False)`, then one
-`processor(text=[...], audio=[...], padding=True)` call for the whole batch --
-extended with the assistant answer turn and prompt-masked labels for training.
+Mirrors `eval.backends.gemma.GemmaBackend`'s batched path -- messages with an
+audio content part, `apply_chat_template(tokenize=False)`, then batched
+`processor(text=[...], audio=[...], padding=True)` calls -- extended with the
+assistant answer turn and prompt-masked labels for training. Unlike eval, it
+pads on the right and calls the processor twice (full conversation, then prompt
+only) to find where each answer starts.
 """
 from typing import List
 

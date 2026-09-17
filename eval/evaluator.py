@@ -23,16 +23,18 @@ def _batched(iterable, n: int):
 
 
 class Evaluator:
-    """Runs batched evaluation of a ModelBackend over an HF dataset.
+    """Runs batched evaluation of a ModelBackend over a list of uad_data rows.
 
     Performance characteristics:
       - Audio preprocessing is parallelised across `config.num_preprocessing_workers`
         threads within each batch. Librosa/scipy resampling releases the GIL, so
         true parallelism is achieved for CPU-bound preprocessing.
-      - Model inference runs on the batch as a whole (one forward pass per batch)
-        using the backend's generate_batch, which maximises GPU utilisation.
-      - Preprocessing for batch N+1 overlaps with inference for batch N because the
-        ThreadPoolExecutor persists across batches.
+      - Model inference runs on the batch as a whole (one batched generate call
+        per batch) using the backend's generate_batch, which maximises GPU
+        utilisation.
+      - Batches run one after another: batch N+1 is preprocessed only after
+        inference for batch N returns. The ThreadPoolExecutor is reused across
+        batches only to avoid recreating its threads.
     """
 
     def __init__(self, backend: ModelBackend, config: EvalConfig) -> None:
@@ -59,8 +61,7 @@ class Evaluator:
         # Opened once here; each batch flushes to it so results survive a mid-run crash.
         jsonl_file = self._open_jsonl(self.config.output_dir)
         try:
-            # Single executor shared across batches so preprocessing for batch N+1
-            # can overlap with GPU inference for batch N.
+            # One executor for the whole run, reused by every batch's preprocessing.
             with ThreadPoolExecutor(max_workers=self.config.num_preprocessing_workers) as executor:
                 for batch in _batched(samples, self.config.batch_size):
                     # Parallel audio decode + resample, then one GPU forward pass.
@@ -117,7 +118,7 @@ class Evaluator:
 
     @staticmethod
     def _open_jsonl(output_dir: str | None):
-        """Create output_dir and open results.jsonl for appending, or return None."""
+        """Create output_dir and open results.jsonl (overwriting it), or return None."""
         if not output_dir:
             return None
         os.makedirs(output_dir, exist_ok=True)

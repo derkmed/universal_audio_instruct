@@ -28,9 +28,9 @@ class Sample:
                 'At least one of system_instruction_template or prompt_template must be provided.')
 
     def to_output(self) -> dict[str, Any]:
-        # NOTE: All fields modified below must be specified in
-        # InternalDatasets.features property. Unspecified fields will not appear in
-        # the outputted generated example.
+        # NOTE: Every field of the metadata record is copied into the row
+        # (including the loader's `tasks` list); the fields below are added or
+        # overwritten on top of it.
         #
         # A shallow copy of the record is taken so that each generated row is an
         # independent dict. The same `metadata` record is reused across every

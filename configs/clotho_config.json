@@ -1,9 +1,11 @@
 {
-    "name": "Clotho Evaluation",
+    "name": "Clotho Caption",
     "datasets": [
         {
             "name": "Clotho",
             "splits": [
+                "train",
+                "validation",
                 "test"
             ],
             "tasks": [

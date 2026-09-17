@@ -2,7 +2,7 @@
 
 Run from the repo root as a module:
 
-    python -m eval.main --model GEMMA-4 --json-config clotho_config.json --split test
+    python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json --split test
 
 Flow: parse flags into an `EvalConfig`, build the chosen model backend, load the
 requested dataset slice via `uad_data.load_uad_dataset` (which fetches audio +

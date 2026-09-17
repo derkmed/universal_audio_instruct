@@ -95,7 +95,7 @@ def _install_fakes(monkeypatch_targets: dict):
     # so patching the hub module attributes is sufficient (loader calls hub.download_*).
 
 
-def run() -> None:
+def test_load_expands_rows() -> None:
     with tempfile.TemporaryDirectory() as root:
         fx = _build_fixture(root)
         _install_fakes(fx)
@@ -142,7 +142,7 @@ def run() -> None:
     print("PASS: load_uad_dataset produced 4 correctly-expanded, independent rows.")
 
 
-def run_streaming() -> None:
+def test_max_samples_streams_prefix() -> None:
     """max_samples auto-enables the streaming archive path and stops early."""
     with tempfile.TemporaryDirectory() as root:
         fx = _build_fixture(root)
@@ -182,5 +182,5 @@ def run_streaming() -> None:
 
 
 if __name__ == "__main__":
-    run()
-    run_streaming()
+    test_load_expands_rows()
+    test_max_samples_streams_prefix()

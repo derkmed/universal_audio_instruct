@@ -1,9 +1,13 @@
-"""Audio preprocessing shared by the eval and train model backends.
+"""Audio preprocessing for the eval and train Gemma backends.
 
 Turns the raw audio bytes carried on each dataset row into the normalized
-float32 mono array the model processors expect. Lives in `uad_data` (rather than
+float32 mono array the Gemma processor expects. Lives in `uad_data` (rather than
 `eval/` or `train/`) because both harnesses need identical preprocessing so that
 finetuned models are trained and evaluated on the same input distribution.
+
+The evaluator runs it for every backend, but only the Gemma backends use the
+array. The Qwen backends hand the raw bytes to `process_mm_info` instead, so the
+16 kHz / 30 s settings don't apply to them.
 """
 import io
 

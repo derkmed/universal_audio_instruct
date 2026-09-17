@@ -10,7 +10,8 @@ loading script. The audio data itself stays on the (private) HF Hub.
   HF repo and turned into normal importable Python:
   - `tasks.py`, `io_templates.py`, `prompts.py`, `sample.py`, `filters.py`,
     `internal_dataset.py`, `internal_datasets.py`, `json_config_loader.py`
-    (moved verbatim, only imports made package-relative);
+    (moved with imports made package-relative; see the fixes below, and later
+    commits for further changes);
   - `collection.py` — plain replacement for the old `UniversalAudioUnderstandingConfig`
     builder-config (no `datasets.GeneratorBasedBuilder`);
   - `hub.py` — downloads audio archives, metadata, prompts and configs from the
@@ -19,14 +20,17 @@ loading script. The audio data itself stays on the (private) HF Hub.
   - `loader.py` — `load_uad_dataset(...)`, the drop-in replacement for
     `load_dataset(..., trust_remote_code=True)`. Streams each `tar.gz`, expands
     every `(audio × task × prompt-template)` combination, and returns row dicts
-    with the **same schema** the loading script produced.
+    with the **same core fields** the loading script produced (rows also keep
+    every metadata field and a `tasks` list).
 - The eval harness moved into an **`eval/`** package (`eval/main.py`, `config.py`,
-  `evaluator.py`, `audio_utils.py`, `backends/`), with intra-package imports made
-  relative. Run it from the repo root with `python -m eval.main ...`.
-- `eval/main.py` and `colab_eval.ipynb` now call `load_uad_dataset(...)` instead of
+  `evaluator.py`, `backends/`), with intra-package imports made relative. Run it
+  from the repo root with `python -m eval.main ...`. (`audio_utils.py` started
+  in `eval/` too, and later moved to `uad_data/` so `train/` can share it.)
+- `eval/main.py` and `eval/colab_eval.ipynb` now call `load_uad_dataset(...)` instead of
   `load_dataset(..., trust_remote_code=True)`.
 - `requirements.txt` gains `huggingface_hub` and `jinja2` as direct deps.
 - `tests/test_loader.py` — offline end-to-end test (synthetic archive, no network).
+  `tests/test_json_config_loader.py` was added later.
 
 Two bugs were fixed in passing:
 - **Windows path separators**: `split_metadata_path` used `os.path.join`, which
@@ -51,15 +55,15 @@ These are plain data files the loader downloads at runtime — keep them:
 The new loader has been validated against the real dataset (offline synthetic
 fixture in `tests/`, plus a real-data run over the local Clotho copy).
 
-**Safe to delete now — the loading script itself:**
+**Done — the loading script itself was deleted** (Hub commit `d513653`):
 
 ```
 Universal-Audio-Understanding.py
 ```
 
-Nothing else imports it, and removing it is what actually takes the dataset "off
-loading scripts": it disables the `trust_remote_code` entry point so no one can
-silently keep using the old loader.
+Nothing else imported it, and removing it is what took the dataset "off loading
+scripts": it disabled the `trust_remote_code` entry point so no one can silently
+keep using the old loader.
 
 **Do NOT delete yet — the helper modules.** They are duplicated in `uad_data/`,
 but other tooling still in the HF repo imports them:
@@ -94,6 +98,6 @@ the name of a config hosted in the repo's `universal_audio_dataset_configs/` fol
 ## How to test (no GPU, no 48 GB download)
 
 ```bash
-python tests/test_loader.py
+python -m pytest tests
 ```
-Only requires `datasets`, `jinja2`, `huggingface_hub`.
+Only requires `pytest`, `datasets`, `jinja2`, `huggingface_hub`.

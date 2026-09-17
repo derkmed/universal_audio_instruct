@@ -17,9 +17,10 @@ HuggingFace `Trainer` API.
 
 `train/` is the training-side twin of `eval/`. Both consume the shared
 [`uad_data`](./uad_data) loader, so training and evaluation see **identical
-rows** (same prompt templates, same audio preprocessing via
-`uad_data.audio_utils`), and each supported model family has one backend in
-each harness:
+rows** (same prompt templates; for Gemma, also the same audio preprocessing via
+`uad_data.audio_utils`, while the Qwen backends pass the raw audio bytes to
+`process_mm_info`), and each supported model family has one backend in each
+harness:
 
 | model (`--model`) | HF id (default) | eval backend | train backend |
 | --- | --- | --- | --- |
@@ -68,8 +69,9 @@ pip install -r requirements.txt -r train/requirements.txt
 export HF_TOKEN=...   # the dataset is private; some models are gated
 ```
 
-Smoke test (tiny slice; `max_samples` streams only an archive prefix, so this
-doesn't download the full multi-GB tar):
+Smoke test (tiny slice; `max_samples` streams the archive and stops early
+instead of downloading the whole tar. Clotho's archive stores its test clips
+first, so reaching the first train clips still reads about 3 GiB):
 
 ```bash
 python -m train.main --model GEMMA-4 --max-samples 32 --epochs 1 --output-dir outputs/smoke
@@ -127,7 +129,8 @@ Not exposed on the CLI (set on `TrainConfig` directly): `lora_dropout` (0.05),
 `lora_target_modules` (attention projections `q/k/v/o_proj`; add
 `gate_proj`/`up_proj`/`down_proj` to also adapt MLPs), `warmup_ratio`,
 `logging_steps`, `save_steps`, `gradient_checkpointing` (on),
-`target_sr`/`max_audio_seconds` (16 kHz / 30 s — keep matched with eval).
+`target_sr`/`max_audio_seconds` (16 kHz / 30 s; Gemma only, since the Qwen
+backend reads raw audio bytes — keep matched with eval).
 
 ## How batches are built (label masking)
 
@@ -139,7 +142,9 @@ all processing happens in the backend's `collate`:
    `output` as the assistant turn.
 2. Process the whole batch through the model's processor
    (`processor(text=[...], audio=[...], padding=True)`), which handles audio
-   feature extraction and padding — identical to eval's batched-inference path.
+   feature extraction and padding. It's the same call shape as eval's
+   batched-inference path, but training pads on the right, while eval pads on
+   the left for generation.
 3. Build labels with the **prompt/full two-pass recipe**: the batch is processed
    a second time with only the prompt (including the generation header); each
    sample's prompt token count (right padding ⇒ `attention_mask.sum()`) is
@@ -180,14 +185,16 @@ Mirror the existing pairs: implement the eval backend first
 (`eval/backends/<model>.py`), then subclass `train.backends.TrainBackend` with
 `_load_processor`, `_load_model` (respecting `config.load_in_4bit`), and
 `collate` reusing the eval backend's conversation shape plus the assistant
-turn. Register the class in both `main.py` dispatch dicts and in
+turn. Export the classes from `eval/backends/__init__.py` and
+`train/backends/__init__.py`, register them in the dispatch dicts in both
+`main.py` files and in the Colab notebook's backend cell, and add the model to
 `eval.config.DEFAULT_MODEL_PATHS`.
 
 ## Caveats & troubleshooting
 
-- **Verified by construction, not by GPU run.** The harness compiles and its
-  imports/config modes are tested, but no end-to-end training step has been run
-  in this environment. Do a `--max-samples 32` smoke run first.
+- **Verified by construction, not by GPU run.** The harness compiles, but
+  `train/` has no tests, and no end-to-end training step has been run in this
+  environment. Do a `--max-samples 32` smoke run first.
 - **Label-mask boundary.** The two-pass recipe assumes the rendered full text
   extends the rendered prompt text and right padding. Both hold for the current
   Gemma/Qwen chat templates; if a template changes, decode a few `labels` rows
