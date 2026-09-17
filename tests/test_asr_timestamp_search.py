@@ -98,14 +98,14 @@ BAD_UTTERANCE_METADATA = [
 ]
 
 
-class RejectAll(filters.SampleFilter):
-    def include_sample(self, sample) -> bool:
+class RejectAll(filters.RowFilter):
+    def include_row(self, row) -> bool:
         return False
 
 
-class FirstUtteranceOnly(filters.SampleFilter):
-    def include_sample(self, sample) -> bool:
-        return sample.utterance_index == 0
+class FirstUtteranceOnly(filters.RowFilter):
+    def include_row(self, row) -> bool:
+        return row.utterance_index == 0
 
 
 def _build_fixture(root: str, name: str, metadata: list[dict], **config) -> dict:
@@ -184,7 +184,7 @@ def _patched_hub(**fakes):
 
 @contextlib.contextmanager
 def _registered_filters(**classes):
-    """Make extra filters selectable by name in a run config's sample_filter."""
+    """Make extra filters selectable by name in a run config's row_filter."""
     filters.FILTER_REGISTRY.update(classes)
     try:
         yield
@@ -287,7 +287,7 @@ def test_random_templates_are_picked_per_utterance() -> None:
 def test_bad_utterance_fails_only_its_own_rows() -> None:
     # Filtered out, the bad utterance never renders, so nothing raises.
     rows = _load_rows(
-        "SparseLibriMix", BAD_UTTERANCE_METADATA, sample_filter="first_utterance_only")
+        "SparseLibriMix", BAD_UTTERANCE_METADATA, row_filter="first_utterance_only")
     assert len(rows) == 4, f"expected 4 rows, got {len(rows)}"
     assert all(r["utterance_index"] == 0 and _renders_own_utterance(r) for r in rows), rows
 
@@ -310,7 +310,7 @@ def test_unusable_transcriptions_fail_only_when_rendered() -> None:
     for case, fields in cases.items():
         metadata = [{"audio_path": f"clips/{case}.wav", **fields}]
 
-        rows = _load_rows("libricss", metadata, sample_filter="reject_all")
+        rows = _load_rows("libricss", metadata, row_filter="reject_all")
         assert rows == [], f"{case}: {rows}"
 
         e = _load_error("libricss", metadata)
@@ -329,7 +329,7 @@ def test_non_object_utterance_fails_only_when_rendered() -> None:
     for case, transcriptions in cases.items():
         metadata = [{"audio_path": f"clips/{case}.wav", "transcriptions": transcriptions}]
 
-        rows = _load_rows("libricss", metadata, sample_filter="reject_all")
+        rows = _load_rows("libricss", metadata, row_filter="reject_all")
         assert rows == [], f"{case}: {rows}"
 
         # A ValueError, not the KeyError a missing-field check would give.

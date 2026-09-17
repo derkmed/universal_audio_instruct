@@ -18,12 +18,12 @@ class UadCollection:
         name: str = 'UniversalAudioDataset',
         internal_datasets: InternalDataset | list[InternalDataset] | None = None,
         randomize_prompt_format: bool = False,
-        sample_filter: filters_lib.SampleFilter | None = None,
+        row_filter: filters_lib.RowFilter | None = None,
     ):
         self._internal_datasets = internal_datasets if internal_datasets is not None else []
         self.name = name
         self.randomize_prompt_format = randomize_prompt_format
-        self.sample_filter = sample_filter or filters_lib.AllPassFilter()
+        self.row_filter = row_filter or filters_lib.AllPassFilter()
 
     @property
     def internal_datasets(self) -> list[InternalDataset]:

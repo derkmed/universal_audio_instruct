@@ -1,6 +1,6 @@
 """Offline test: `Task.render_context` checks the `utterance_index` it is given.
 
-The loader only passes indices from `Task.utterance_indices`, but `Sample` and
+The loader only passes indices from `Task.utterance_indices`, but `Row` and
 `render_context` can be called directly. An index that doesn't name an utterance
 of the clip must fail with a ValueError that says which row it is, and a task
 without utterances must not accept one at all.

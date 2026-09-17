@@ -19,7 +19,7 @@ class ModelBackend(ABC):
     """Abstract base for audio+text model backends.
 
     Subclasses must implement generate_batch. The evaluator always calls
-    generate_batch; generate is a convenience wrapper for single samples.
+    generate_batch; generate is a convenience wrapper for single rows.
     """
 
     @abstractmethod

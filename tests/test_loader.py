@@ -120,14 +120,14 @@ def _patched_hub(**fakes):
         prompts.PROMPTS_DIR = original_prompts_dir
 
 
-class RejectAll(filters.SampleFilter):
-    def include_sample(self, sample) -> bool:
+class RejectAll(filters.RowFilter):
+    def include_row(self, row) -> bool:
         return False
 
 
 @contextlib.contextmanager
 def _registered_filters(**classes):
-    """Make extra filters selectable by name in a run config's sample_filter."""
+    """Make extra filters selectable by name in a run config's row_filter."""
     filters.FILTER_REGISTRY.update(classes)
     try:
         yield
@@ -175,7 +175,7 @@ def test_load_expands_rows() -> None:
     ]), a_outputs
 
     # Aliasing guard: the two rows for the same audio must be independent objects
-    # with distinct outputs (regression test for the shallow-copy fix in Sample).
+    # with distinct outputs (regression test for the shallow-copy fix in Row).
     assert a_rows[0] is not a_rows[1]
     assert a_rows[0]["output"] != a_rows[1]["output"]
 
@@ -228,7 +228,7 @@ def test_missing_field_fails_only_when_rendered() -> None:
     metadata = [{"audio_path": "test/a.wav"}, METADATA[1]]  # a.wav has no caption
 
     with tempfile.TemporaryDirectory() as root:
-        fx = _build_fixture(root, metadata, {**CONFIG, "sample_filter": "reject_all"})
+        fx = _build_fixture(root, metadata, {**CONFIG, "row_filter": "reject_all"})
         with _patched_hub(**_fake_hub(fx)), _registered_filters(reject_all=RejectAll):
             rows = loader.load_uad_dataset(
                 json_config_path=fx["config_path"], split="test", token=None)

@@ -42,12 +42,12 @@ class Evaluator:
         self.config = config
 
     def evaluate(self, dataset) -> dict:
-        samples = list(dataset)
+        rows = list(dataset)
         if self.config.max_samples is not None:
-            samples = samples[: self.config.max_samples]
+            rows = rows[: self.config.max_samples]
 
-        total = len(samples)
-        print(f"Evaluating {total} samples (batch_size={self.config.batch_size})")
+        total = len(rows)
+        print(f"Evaluating {total} rows (batch_size={self.config.batch_size})")
 
         preprocess_fn = partial(
             preprocess_audio,
@@ -63,7 +63,7 @@ class Evaluator:
         try:
             # One executor for the whole run, reused by every batch's preprocessing.
             with ThreadPoolExecutor(max_workers=self.config.num_preprocessing_workers) as executor:
-                for batch in _batched(samples, self.config.batch_size):
+                for batch in _batched(rows, self.config.batch_size):
                     # Parallel audio decode + resample, then one GPU forward pass.
                     requests = self._preprocess_batch(batch, preprocess_fn, executor)
                     predictions = self.backend.generate_batch(requests)
@@ -90,7 +90,7 @@ class Evaluator:
                                 "prediction": pred,
                             }
                             jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-                            jsonl_file.flush()  # persist after every sample; safe to interrupt
+                            jsonl_file.flush()  # persist after every row; safe to interrupt
         finally:
             if jsonl_file:
                 jsonl_file.close()
@@ -131,7 +131,7 @@ class Evaluator:
         preprocess_fn,
         executor: ThreadPoolExecutor,
     ) -> List[InferenceRequest]:
-        """Preprocess audio for all samples in the batch in parallel."""
+        """Preprocess audio for all rows in the batch in parallel."""
         future_to_idx = {
             executor.submit(preprocess_fn, s["audio"]["bytes"]): idx
             for idx, s in enumerate(batch)

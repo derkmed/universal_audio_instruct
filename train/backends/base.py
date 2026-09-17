@@ -15,7 +15,7 @@ model family, everything else is shared. A training backend owns:
 Label masking uses the standard prompt/full two-pass recipe: the batch is
 processed twice through the processor -- once with just the prompt (system +
 user turn + generation header) and once with the full conversation including
-the assistant answer. The prompt token count per sample (with right padding,
+the assistant answer. The prompt token count per row (with right padding,
 `attention_mask.sum()`) gives the prefix to mask with -100, so only answer
 tokens contribute to the loss. Processing the prompt with the *same audio*
 matters: processors expand the audio placeholder into a variable number of
@@ -99,9 +99,9 @@ class TrainBackend(ABC):
         full_attention_mask: torch.Tensor,
         prompt_attention_mask: torch.Tensor,
     ) -> torch.Tensor:
-        """Build labels: -100 on padding and on each sample's prompt prefix.
+        """Build labels: -100 on padding and on each row's prompt prefix.
 
-        Requires right padding so that a sample's prompt occupies positions
+        Requires right padding so that a row's prompt occupies positions
         [0, prompt_len) of its full sequence.
         """
         labels = full_input_ids.clone()

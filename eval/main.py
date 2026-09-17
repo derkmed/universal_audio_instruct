@@ -108,7 +108,7 @@ def main() -> None:
         token=hf_token,
         max_samples=config.max_samples,
     )
-    print(f"Dataset loaded: {len(dataset)} samples")
+    print(f"Dataset loaded: {len(dataset)} rows")
 
     evaluator = Evaluator(backend, config)
     results = evaluator.evaluate(dataset)

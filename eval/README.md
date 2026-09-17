@@ -28,7 +28,7 @@ flowchart TD
     end
 
     EV --> BATCH
-    GEN -- "predictions" --> JSONL["results.jsonl<br/>(flushed per sample — crash-safe)"]
+    GEN -- "predictions" --> JSONL["results.jsonl<br/>(flushed per row — crash-safe)"]
     GEN -- "predictions + references" --> WER["WER (hf evaluate)"]
     WER --> SUM["summary.json + console report"]
 ```

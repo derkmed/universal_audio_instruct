@@ -11,13 +11,13 @@ class GemmaBackend(ModelBackend):
     """Gemma-4 backend with batched inference.
 
     Batching strategy:
-      - apply_chat_template(tokenize=False) per sample → formatted text string
+      - apply_chat_template(tokenize=False) per row → formatted text string
         with audio placeholder tokens.
       - processor(text=[...], audio=[...], padding=True) batches all samples in
         one call; the processor handles audio feature extraction and padding.
       - model.generate runs once for the whole batch.
 
-    Falls back to sequential single-sample inference if the batch call raises
+    Falls back to sequential single-row inference if the batch call raises
     (e.g. processor version doesn't support batch audio).
     """
 

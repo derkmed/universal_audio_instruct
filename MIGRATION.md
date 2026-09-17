@@ -8,7 +8,7 @@ loading script. The audio data itself stays on the (private) HF Hub.
 
 - New package **`uad_data/`** — the dataset-generation library, moved out of the
   HF repo and turned into normal importable Python:
-  - `tasks.py`, `io_templates.py`, `prompts.py`, `sample.py`, `filters.py`,
+  - `tasks.py`, `io_templates.py`, `prompts.py`, `row.py`, `filters.py`,
     `internal_dataset.py`, `internal_datasets.py`, `json_config_loader.py`
     (moved with imports made package-relative; see the fixes below, and later
     commits for further changes);
@@ -36,9 +36,9 @@ Two bugs were fixed in passing:
 - **Windows path separators**: `split_metadata_path` used `os.path.join`, which
   emits `data\...\...` on Windows and breaks Hub paths; it now uses `/`
   explicitly, and `hub.to_repo_path` normalizes any stray backslashes.
-- **Row aliasing**: `Sample.to_output()` reused the shared metadata dict, so
-  materializing the generator into a list aliased every expansion of one audio
-  clip to the last one. It now returns an independent shallow copy. (Invisible
+- **Row aliasing**: `Sample.to_output()` (now `Row`) reused the shared metadata
+  dict, so materializing the generator into a list aliased every expansion of
+  one audio clip to the last one. It now returns an independent shallow copy. (Invisible
   under the old script because each yield was serialized straight to Arrow.)
 
 ## What stays on the HF repo (do NOT delete)

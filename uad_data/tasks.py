@@ -2,7 +2,7 @@
 
 `Task` enumerates every task the dataset supports and, via `Task.features`, the
 metadata column(s) each task expects. `Task.render_context` reads those fields
-from a record for `sample.Sample` to render the prompt / instruction / output
+from a record for `row.Row` to render the prompt / instruction / output
 templates with, so the keys here must match the fields present in the per-split
 metadata JSONs and the placeholders used in `prompts/*.json`.
 """
@@ -36,7 +36,7 @@ class Task(enum.Enum):
         """
         if self == Task.CLASSIFICATION:
             return {
-                # Ground truth category for this sample.
+                # Ground truth category for this clip.
                 'category': datasets.Value('string'),
                 # Comma-delimited string of all available categories.
                 'categories': datasets.Value('string'),
@@ -94,7 +94,7 @@ class Task(enum.Enum):
         `render_context`.
 
         Never raises: bad metadata is reported when a row renders, after the
-        sample filter has decided whether that row is wanted at all.
+        row filter has decided whether that row is wanted at all.
         """
         if self == Task.ASR_TIMESTAMP_SEARCH:
             utterances = record.get('transcriptions')
