@@ -330,8 +330,8 @@ Wherever "sample" means a row, it becomes "row":
   `ValueError` saying the key is now `row_filter`, so an old filter can't be
   dropped silently. **(grill)**
 
-Not renamed: `max_samples` in `uad_data/audio_utils.py`, which really means
-audio samples. It's tracked in [#12].
+Not renamed here: `max_samples` in `uad_data/audio_utils.py`, which really
+means audio samples. [#12] renamed it separately, to `max_audio_samples`.
 
 ### Colab notebook ([#7])
 
@@ -663,7 +663,8 @@ See [Acceptance](#acceptance).
   `timestamp_search.json` and `demo.json` ([#6]).
 - **Leftover helper modules in the Hub repo:** removing them is a separate,
   already pending effort ([#1]).
-- **Renaming `audio_utils`' `max_samples`:** tracked in [#12].
+- **Renaming `audio_utils`' `max_samples`:** done separately in [#12]
+  (now `max_audio_samples`).
 - **Counting metadata records that never matched an archive entry:** [#3]
   suggested it, but the report in [#8] only compares clips found with n.
 
@@ -708,8 +709,8 @@ See [Acceptance](#acceptance).
 ### Code and docs
 
 - [ ] Outside `docs/specs/` and `docs/research/`:
-  - [ ] `git grep -n "max_samples\|max-samples"` finds only
-    `uad_data/audio_utils.py`;
+  - [ ] `git grep -n "max_samples\|max-samples"` finds nothing (the
+    `uad_data/audio_utils.py` variable was renamed in [#12]);
   - [ ] `git grep -nw "Sample\|SampleFilter\|iter_samples\|include_sample\|sample_filter"`
     finds only `MIGRATION.md`'s history notes, each marked "(now `Row`)".
 - [ ] `docs/research/complete-configs-load-check.py` starts with a note pinning

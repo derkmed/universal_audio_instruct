@@ -24,7 +24,8 @@ def preprocess_audio(
     """Decode bytes → float32 mono array at target_sr, capped at max_seconds.
 
     The cap is ``max_seconds * target_sr`` audio samples, counted after
-    resampling, so it holds whatever rate the clip was recorded at.
+    resampling, so the cap is ``max_seconds`` of audio whatever rate the clip
+    was recorded at.
     """
     buf = io.BytesIO(audio_bytes)
     arr, orig_sr = sf.read(buf, dtype="float32")
