@@ -335,7 +335,7 @@ def test_non_object_utterance_fails_only_when_rendered() -> None:
         for part in ("expected an object", f"clips/{case}.wav", "utterance 0"):
             assert part in str(e), f"{case}: {part!r} not in {e}"
 
-    print("PASS: a string or list utterance fails only when its row renders.")
+    print("PASS: a string or list utterance fails only when its rows render.")
 
 
 if __name__ == "__main__":
