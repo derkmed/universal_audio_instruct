@@ -43,7 +43,7 @@ flowchart LR
     CONFIGS --> UAD
     UAD -- "rows: audio bytes +<br/>system_instruction / prompt / output" --> EVAL
     UAD -- "same rows" --> TRAIN
-    EVAL --> METRICS["WER + results.jsonl<br/>+ summary.json"]
+    EVAL --> METRICS["per-group pass/fail + metric<br/>results.jsonl + summary.json"]
     TRAIN --> ADAPTER["LoRA adapter / weights<br/>(output_dir)"]
     ADAPTER -. "merge, then<br/>--model-path" .-> EVAL
 ```
@@ -147,8 +147,10 @@ For a dataset called `MyDataset`:
    python -m eval.main --model GEMMA-4 --json-config configs/mydataset_config.json --split test --clips-per-split 5
    ```
 
-   Note that the evaluator currently computes a single WER over all rows,
-   whatever their task.
+   The evaluator reports one group per (internal dataset, split, task): its row
+   statuses, whether it passed, and one preliminary metric for its task (WER or
+   a hit rate). Metrics are for information only; a group passes when it has
+   rows and every one of them is `ok`.
 
 | Symptom | Likely cause |
 | --- | --- |

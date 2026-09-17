@@ -124,14 +124,18 @@ def main() -> None:
         seed=config.seed,
     )
     print(f"Dataset loaded: {len(dataset)} rows")
+    # The report carries the warnings the summary doesn't: a selected split that
+    # came up short of the cap without coming up empty.
+    print(dataset.report.describe())
 
     evaluator = Evaluator(backend, config)
-    results = evaluator.evaluate(dataset)
+    summary = evaluator.evaluate(dataset)
 
-    print(f"\n=== Final Results ===")
-    # Add other audio metrics here.
-    print(f"  WER:     {results['wer']:.4f}")
-    print(f"  Samples: {results['num_samples']}")
+    # A smoke run is a check, so its exit status reports what it found: a failing
+    # group, or an internal dataset that never loaded. A regular run exits 0
+    # unless something raised, even when a group fails on empty_output.
+    if config.is_smoke_run and not summary["passed"]:
+        raise SystemExit("Smoke run finished with failing groups. See the table above.")
 
 
 if __name__ == "__main__":
