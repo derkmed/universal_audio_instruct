@@ -125,6 +125,8 @@ DATASETS = [
     ),
     InternalDataset(
         name='MELD',
+        # "clips" replaces the corpus's own "utterances": MELD calls a whole clip an
+        # utterance, but in CONTEXT.md an Utterance is part of a clip.
         description=(
             'MELD contains the same dialogue instances available in EmotionLines, but it also '
             'encompasses audio and visual modality along with text. MELD has more than 1400 '
@@ -232,6 +234,8 @@ DATASETS = [
     ),
     InternalDataset(
         name='URDU',
+        # "clips" replaces the corpus's own "utterances": URDU calls a whole clip an
+        # utterance, but in CONTEXT.md an Utterance is part of a clip.
         description=(
             'URDU dataset contains emotional clips of Urdu speech gathered from Urdu '
             'talk shows. It contains 400 clips of four basic emotions: Angry, Happy, '
