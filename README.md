@@ -50,7 +50,8 @@ flowchart LR
 
 No code is downloaded or executed from the Hub (`trust_remote_code` is gone);
 `uad_data` fetches only plain data files and expands each audio clip into
-`(task × prompt-template)` rows locally.
+`(task × prompt-template)` rows locally. `asr_timestamp_search` also expands per
+utterance: `(task × utterance × prompt-template)`.
 
 ## Quickstart (evaluation)
 

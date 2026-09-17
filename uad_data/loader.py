@@ -5,14 +5,16 @@ the old `load_dataset("AudioInstruct/Universal-Audio-Understanding", ...,
 trust_remote_code=True)` -- audio, system_instruction, prompt, output, task,
 split, originating_dataset, plus the per-task metadata fields -- so the
 downstream Evaluator is unchanged. Rows also carry every other field of the
-clip's metadata record, and a `tasks` list of `Task` values.
+clip's metadata record, and a `tasks` list of `Task` values. asr_timestamp_search
+rows also carry `utterance_index`, the position in `transcriptions` of the
+utterance they render.
 
 Pipeline per selected internal dataset + split:
   1. obtain the audio archive and the split metadata JSON from the Hub,
   2. stream the tar archive, looking up each member's metadata by audio_path,
-  3. for every (task, render context, prompt-template) combination, build a Sample
-     and emit its row. A task has one render context per clip, except
-     asr_timestamp_search, which has one per segment (see `Task.render_contexts`).
+  3. for every (task, utterance, prompt-template) combination, build a Sample and
+     emit its row. Only asr_timestamp_search renders a clip once per utterance
+     (see `Task.utterance_indices`); other tasks render it once.
 
 The archive is read one of two ways (see `_open_archive`): fully downloaded and
 cached via `hub.download_file` (default), or lazily streamed via
@@ -123,8 +125,10 @@ def iter_samples(
                 file_bytes = extracted.read()
                 record = metadata[sample_path]
                 for task in record["tasks"]:
-                    # Usually one context per clip; asr_timestamp_search has one per segment.
-                    for context in task.render_contexts(record):
+                    # One pass per utterance for asr_timestamp_search, one pass otherwise.
+                    # With randomize on, each utterance gets its own template pick, so
+                    # a seeded pick must include the utterance index in its seed.
+                    for utterance_index in task.utterance_indices(record):
                         for si_t, p_t, o_t in _get_prompt_templates(task, randomize):
                             sample = Sample(
                                 audio_path=sample_path,
@@ -136,7 +140,7 @@ def iter_samples(
                                 system_instruction_template=si_t,
                                 prompt_template=p_t,
                                 output_template=o_t,
-                                render_context=context,
+                                utterance_index=utterance_index,
                             )
                             if collection.sample_filter.include_sample(sample):
                                 yield sample.to_output()

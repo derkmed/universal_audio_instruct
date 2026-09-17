@@ -1,9 +1,10 @@
 """Jinja2 template wrappers for the three text fields of a generated row.
 
 Each `Template` binds a task to a jinja2 string; `make(context)` renders it with
-the task's metadata fields. `prompts.PromptFilepath` builds these from the
-`system_instructions` / `prompts` / `outputs` arrays in a `prompts/*.json` file,
-one subclass per field:
+the values `Task.render_context` reads from a row's metadata (for
+asr_timestamp_search, from one utterance). `prompts.PromptFilepath` builds these
+from the `system_instructions` / `prompts` / `outputs` arrays in a
+`prompts/*.json` file, one subclass per field:
   - `SystemInstructionTemplate` -> the row's `system_instruction`
   - `PromptTemplate`            -> the row's `prompt`
   - `OutputTemplate`            -> the row's `output` (ground truth)
