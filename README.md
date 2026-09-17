@@ -91,6 +91,69 @@ mirroring the eval backends. Three modes: QLoRA (default), LoRA on a bf16 base
 (`--no-4bit`), full finetune (`--no-4bit --no-lora`). **Full guide:
 [`FINETUNING.md`](./FINETUNING.md).**
 
+## Onboarding a new internal dataset
+
+An *internal dataset* is one source corpus inside the benchmark (Clotho, VIVOS,
+URDU, …). Adding one touches both repos: the audio, metadata and prompt templates
+go to the HF dataset repo, and the registry entry that lets `uad_data` find them
+goes here. The data format and upload steps are documented on the dataset card:
+**[Onboarding a new internal dataset (HF)](https://huggingface.co/datasets/AudioInstruct/Universal-Audio-Understanding#onboarding-a-new-internal-dataset)**.
+
+For a dataset called `MyDataset`:
+
+1. **Choose its tasks.** Each task must be a `Task` in
+   [`uad_data/tasks.py`](./uad_data/tasks.py) *and* have a `prompts/<task>.json`
+   on the Hub. `Task.features` lists the metadata fields that task reads (e.g.
+   `classification` needs `category` and `categories`; `asr` needs
+   `transcription`), so name your metadata fields to match. If you need a new
+   task, add an enum value and its `features` entry here, and upload a matching
+   prompt file to the Hub.
+2. **Upload the data to the HF repo**, following the dataset card:
+   `data/MyDataset/MyDataset.tar.gz` plus one `data/MyDataset/MyDataset_<split>.json`
+   per split. Each `audio_path` in the metadata must match an archive member path
+   exactly, and each record must include every field from step 1.
+3. **Register it** in [`uad_data/internal_datasets.py`](./uad_data/internal_datasets.py),
+   keeping `DATASETS` in alphabetical order:
+
+   ```python
+   InternalDataset(
+       name='MyDataset',   # must match the folder name under data/ exactly (case-sensitive)
+       description='What it is, in a sentence or two.\nhttps://link-to-source',
+       tasks=[Task.CLASSIFICATION, Task.ASR],
+       splits=[datasets.Split.TRAIN, datasets.Split.TEST],   # only splits that have a metadata JSON
+       data_url='data/MyDataset/MyDataset.tar.gz',
+   ),
+   ```
+
+   `tasks` and `splits` list everything the dataset supports. A run config can
+   only request a subset of them.
+4. **Add a run config** such as `configs/mydataset_config.json`, in the same
+   shape as [`configs/clotho_config.json`](./configs/clotho_config.json). `tasks`
+   is required. If you leave out `splits`, the config uses every registered
+   split. To let others load the config by name, also upload it to the Hub's
+   `universal_audio_dataset_configs/`.
+5. **Test it**, then commit the registry entry and config. The offline test
+   catches mistakes in the registry file. The smoke test runs against the Hub,
+   and `--max-samples` makes it stream the archive and stop early, so it
+   downloads only the first part of the archive:
+
+   ```bash
+   python tests/test_loader.py
+   python -m eval.main --model GEMMA-4 --json-config configs/mydataset_config.json --split test --max-samples 5
+   ```
+
+   Note that the evaluator currently reports WER for every task, including
+   non-transcription tasks.
+
+| Symptom | Likely cause |
+| --- | --- |
+| `Unsupported dataset: MyDataset` | Not registered in `DATASETS`, or the name's case differs |
+| `Task: [...]` or `Splits: [...] requested of MyDataset, which only contains ...` | The config asks for a task or split that the registry entry doesn't declare |
+| `No prompt file exists for Task.X` | The Hub has no `prompts/<task>.json` for that task |
+| `KeyError` while rendering a row | A metadata record is missing a field that its task's `Task.features` requires |
+| Hub "entry not found" / 404 | The file isn't at `data/MyDataset/MyDataset_<split>.json` or at `data_url` |
+| Loads 0 rows for the dataset | Archive member paths don't match `audio_path` (e.g. `./audio/x.wav` vs `audio/x.wav`) |
+
 ## Tests
 
 ```bash
