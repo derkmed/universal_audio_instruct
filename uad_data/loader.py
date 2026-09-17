@@ -126,8 +126,8 @@ def iter_samples(
                 record = metadata[sample_path]
                 for task in record["tasks"]:
                     # One pass per utterance for asr_timestamp_search, one pass otherwise.
-                    # With randomize on, each utterance gets its own template pick, so
-                    # a seeded pick must include the utterance index in its seed.
+                    # With randomize on, each utterance must get its own template
+                    # pick, not one shared by the whole clip.
                     for utterance_index in task.utterance_indices(record):
                         for si_t, p_t, o_t in _get_prompt_templates(task, randomize):
                             sample = Sample(
