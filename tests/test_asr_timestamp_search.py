@@ -3,13 +3,14 @@
 The task's metadata gives each clip a `transcriptions` list of timed segments
 (`start_time`, `end_time`, `transcription`), while its prompt templates ask about a
 single span. Builds a synthetic archive + metadata + prompt file (a copy of the
-Hub's `prompts/asr_timestamp_search.json`), monkeypatches the Hub download
-functions so nothing touches the network, and asserts every segment is rendered
-with every template.
+Hub's `prompts/asr_timestamp_search.json`), temporarily swaps the Hub download
+functions for fakes so nothing touches the network (restoring them afterwards),
+and asserts every segment is rendered with every template.
 
 Runnable directly (`python tests/test_asr_timestamp_search.py`) or under pytest.
 Only requires `datasets`, `jinja2`, `huggingface_hub`.
 """
+import contextlib
 import io
 import json
 import os
@@ -69,8 +70,8 @@ SUBSEG_METADATA = [
     },
 ]
 
-# Shaped like the Hub's SparseLibriMix_test.json at c4e1b16, whose segments say
-# start / end rather than start_time / end_time.
+# Shaped like the Hub's SparseLibriMix_test.json before Hub commit e80eab1, when
+# its segments said start / end rather than start_time / end_time.
 START_END_METADATA = [
     {
         "transcriptions": [
@@ -115,8 +116,8 @@ def _build_fixture(root: str, name: str, metadata: list[dict]) -> dict:
     }
 
 
-def _install_fakes(fx: dict):
-    """Redirect hub.* to local fixture files instead of the network."""
+def _fake_hub(fx: dict) -> dict:
+    """Fake hub.* functions that serve local fixture files instead of the network."""
     def fake_download_file(path_or_url, *, repo_id=None, revision=None, token=None):
         base = os.path.basename(hub.to_repo_path(path_or_url))
         if base == f"{fx['name']}.tar.gz":
@@ -128,19 +129,38 @@ def _install_fakes(fx: dict):
     def fake_download_prompts_dir(*, repo_id=None, revision=None, token=None):
         return fx["prompts_dir"]
 
-    hub.download_file = fake_download_file
-    hub.download_prompts_dir = fake_download_prompts_dir
+    return {
+        "download_file": fake_download_file,
+        "download_prompts_dir": fake_download_prompts_dir,
+    }
+
+
+@contextlib.contextmanager
+def _patched_hub(**fakes):
+    """Swap hub.* attributes for fakes, restoring the real ones on exit.
+
+    Same as in test_loader.py: restoring them keeps one test's fakes from leaking
+    into later tests in the same pytest run.
+    """
+    originals = {name: getattr(hub, name) for name in fakes}
+    for name, fake in fakes.items():
+        setattr(hub, name, fake)
+    try:
+        yield
+    finally:
+        for name, original in originals.items():
+            setattr(hub, name, original)
 
 
 def _load_rows(name: str, metadata: list[dict]) -> list[dict]:
     with tempfile.TemporaryDirectory() as root:
         fx = _build_fixture(root, name, metadata)
-        _install_fakes(fx)
-        return loader.load_uad_dataset(
-            json_config_path=fx["config_path"],
-            split="test",
-            token=None,
-        )
+        with _patched_hub(**_fake_hub(fx)):
+            return loader.load_uad_dataset(
+                json_config_path=fx["config_path"],
+                split="test",
+                token=None,
+            )
 
 
 def _expected_texts(segment: dict) -> set[tuple[str, str]]:
