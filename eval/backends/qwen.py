@@ -24,7 +24,7 @@ class QwenBackend(ModelBackend):
       - model.generate runs once for the whole batch.
       - Temp files are cleaned up in a finally block.
 
-    Falls back to sequential single-sample inference if batch call fails.
+    Falls back to sequential single-row inference if batch call fails.
     """
 
     USE_AUDIO_IN_VIDEO = False
@@ -137,7 +137,7 @@ class QwenBackend(ModelBackend):
                 # Each conversation has exactly one audio file
                 batch_audios.append(audios[0] if audios else None)
 
-            # Left-pad so prompt ends at the same position for all samples
+            # Left-pad so prompt ends at the same position for all rows
             self.processor.tokenizer.padding_side = "left"
             inputs = self.processor(
                 text=texts,

@@ -1,4 +1,4 @@
-"""Encapsulation of outputted data sample."""
+"""A row: one clip rendered for one task, utterance and prompt template."""
 
 import dataclasses
 import os
@@ -10,7 +10,7 @@ from .tasks import Task
 AUDIO_DATA_BASEPATH = "./data"
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class Sample:
+class Row:
 
     audio_path: str
     dataset_name: str
@@ -64,15 +64,15 @@ class Sample:
 
     def build_system_instruction(self) -> str:
         if not self.system_instruction_template:
-            raise ValueError('Sample does not contain a system instruction template.')
+            raise ValueError('Row does not contain a system instruction template.')
         return self.system_instruction_template.make(self._context())
 
     def build_prompt(self) -> str:
         if not self.prompt_template:
-            raise ValueError('Sample does not contain a prompt template.')
+            raise ValueError('Row does not contain a prompt template.')
         return self.prompt_template.make(self._context())
 
     def build_output(self) -> str:
         if not self.output_template:
-            raise ValueError('Sample does not contain output.')
+            raise ValueError('Row does not contain output.')
         return self.output_template.make(self._context())

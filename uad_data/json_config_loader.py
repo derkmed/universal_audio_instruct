@@ -107,14 +107,14 @@ class UniversalJsonConfig:
     * randomize_prompt_format: boolean field to indicate random selection of prompt/expected
       outputs. Setting to False defaults to inclusion of the cross-product of all prompt-output
       format pairings.
-    * sample_filter: name of a filter to apply to samples. One of: "all_pass" (default), "random".
+    * row_filter: name of a filter to apply to rows. One of: "all_pass" (default), "random".
     """
 
     # Expected JSON fields apper below along with their type.
     name: str
     internal_datasets: list[InternalDatasetJsonConfig]
     randomize_prompt_format: bool = False
-    sample_filter: filters_lib.SampleFilter | None = None
+    row_filter: filters_lib.RowFilter | None = None
 
     def __init__(self, *, filepath: str):
         with open(filepath) as f:
@@ -135,16 +135,22 @@ class UniversalJsonConfig:
             if 'randomize_prompt_format' in data.keys():
                 self.randomize_prompt_format = bool(data['randomize_prompt_format'])
 
-            # Parse the optional sample filter.
+            # The filter key used to be `sample_filter`. Refuse it rather than
+            # ignore it, so an old config can't silently lose its filter.
             if 'sample_filter' in data.keys():
-                self.sample_filter = filters_lib.from_config(data['sample_filter'])
+                raise ValueError(
+                    'The run config key "sample_filter" is now "row_filter"; rename it.')
+
+            # Parse the optional row filter.
+            if 'row_filter' in data.keys():
+                self.row_filter = filters_lib.from_config(data['row_filter'])
 
     def toCollection(self) -> UadCollection:
         return UadCollection(
             name=self.name,
             internal_datasets=[d.toInternalDataset() for d in self.internal_datasets],
             randomize_prompt_format=self.randomize_prompt_format,
-            sample_filter=self.sample_filter,
+            row_filter=self.row_filter,
         )
 
 

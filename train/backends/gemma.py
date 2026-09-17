@@ -80,7 +80,7 @@ class GemmaTrainBackend(TrainBackend):
             full_texts.append(self.processor.apply_chat_template(
                 full_messages, add_generation_prompt=False, tokenize=False))
 
-        # Right padding so each sample's prompt is a prefix (required by mask_labels).
+        # Right padding so each row's prompt is a prefix (required by mask_labels).
         self.processor.tokenizer.padding_side = "right"
         full = self.processor(
             text=full_texts, audio=audio_arrays, return_tensors="pt", padding=True)

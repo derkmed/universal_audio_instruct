@@ -12,7 +12,7 @@ utterance they render.
 Pipeline per selected internal dataset + split:
   1. obtain the audio archive and the split metadata JSON from the Hub,
   2. stream the tar archive, looking up each member's metadata by audio_path,
-  3. for every (task, utterance, prompt-template) combination, build a Sample and
+  3. for every (task, utterance, prompt-template) combination, build a Row and
      emit its row. Only asr_timestamp_search renders a clip once per utterance
      (see `Task.utterance_indices`); other tasks render it once.
 
@@ -33,7 +33,7 @@ from . import hub
 from . import prompts as prompts_lib
 from .collection import UadCollection
 from .json_config_loader import UniversalJsonConfig
-from .sample import Sample
+from .row import Row
 from .tasks import Task
 
 
@@ -88,7 +88,7 @@ def _open_archive(data_url: str, *, stream: bool, repo_id: str, revision, token)
             yield archive
 
 
-def iter_samples(
+def iter_rows(
     collection: UadCollection,
     split,
     *,
@@ -116,22 +116,22 @@ def iter_samples(
             for member in archive:
                 if not member.isfile():
                     continue
-                sample_path = member.name
-                if sample_path not in metadata:
+                audio_path = member.name
+                if audio_path not in metadata:
                     continue
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     continue
                 file_bytes = extracted.read()
-                record = metadata[sample_path]
+                record = metadata[audio_path]
                 for task in record["tasks"]:
                     # One pass per utterance for asr_timestamp_search, one pass otherwise.
                     # With randomize on, each utterance must get its own template
                     # pick, not one shared by the whole clip.
                     for utterance_index in task.utterance_indices(record):
                         for si_t, p_t, o_t in _get_prompt_templates(task, randomize):
-                            sample = Sample(
-                                audio_path=sample_path,
+                            row = Row(
+                                audio_path=audio_path,
                                 dataset_name=internal_dataset.name,
                                 split=metadata["split"],
                                 task=task,
@@ -142,8 +142,8 @@ def iter_samples(
                                 output_template=o_t,
                                 utterance_index=utterance_index,
                             )
-                            if collection.sample_filter.include_sample(sample):
-                                yield sample.to_output()
+                            if collection.row_filter.include_row(row):
+                                yield row.to_output()
                                 count += 1
                                 if max_samples is not None and count >= max_samples:
                                     return
@@ -190,7 +190,7 @@ def load_uad_dataset(
 
     collection = UniversalJsonConfig(filepath=config_path).toCollection()
     split_key = datasets.Split(split) if isinstance(split, str) else split
-    return list(iter_samples(
+    return list(iter_rows(
         collection, split_key,
         repo_id=repo_id, revision=revision, token=token,
         max_samples=max_samples, stream=stream))

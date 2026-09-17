@@ -1,5 +1,10 @@
 """Offline load check for the run configs complete-1..5 (issue #3).
 
+Pinned to commit 8f0b6f9. Run it from a checkout of that commit, e.g.
+`git worktree add ../uad-8f0b6f9 8f0b6f9`. Later commits renamed the `uad_data`
+names it uses (`Sample`, `iter_samples`, `sample_filter`), and the code here is
+kept as it was so that it still reproduces the findings.
+
 Answers "would a smoke run over complete-1..5 load cleanly today?" by running the
 real `uad_data` code (config validation, metadata loading, prompt matching,
 `Sample.to_output`) against a LOCAL copy of the Hub dataset repo, plus a full

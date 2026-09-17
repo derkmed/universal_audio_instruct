@@ -1,56 +1,54 @@
-"""Per-sample inclusion filters applied during row generation.
+"""Per-row inclusion filters applied during row generation.
 
-A `SampleFilter.include_sample(sample)` decides whether an expanded row is kept.
-Filters are selected by name in a run config's optional `sample_filter` field
+A `RowFilter.include_row(row)` decides whether an expanded row is kept.
+Filters are selected by name in a run config's optional `row_filter` field
 (`from_config`); the default is `AllPassFilter` (keep everything).
 """
 
 import abc
 import random
 
-from . import sample
+from .row import Row
 
-Sample = sample.Sample
-
-class SampleFilter(abc.ABC):
-    """Use this filter to determine whether a sample should be included in a dataset or not."""
+class RowFilter(abc.ABC):
+    """Use this filter to determine whether a row should be included in a dataset or not."""
 
     def __init__(self):
         pass
 
     @abc.abstractmethod
-    def include_sample(self, sample: Sample) -> bool:
+    def include_row(self, row: Row) -> bool:
         raise NotImplementedError
 
-class AllPassFilter(SampleFilter):
-    """All samples are filtered in."""
+class AllPassFilter(RowFilter):
+    """All rows are filtered in."""
 
-    def include_sample(self, sample: Sample) -> bool:
+    def include_row(self, row: Row) -> bool:
         return True
 
 
-class RandomFilter(SampleFilter):
-    """All samples are selected randomly."""
+class RandomFilter(RowFilter):
+    """All rows are selected randomly."""
 
     def __init__(self, random_seed: int = 42):
         super().__init__()
         random.seed(random_seed)
 
-    def include_sample(self, sample: Sample) -> bool:
+    def include_row(self, row: Row) -> bool:
         if random.random() > 0.5:
             return True
         else:
             return False
 
 
-FILTER_REGISTRY: dict[str, type[SampleFilter]] = {
+FILTER_REGISTRY: dict[str, type[RowFilter]] = {
     'all_pass': AllPassFilter,
     'random': RandomFilter,
 }
 
 
-def from_config(name: str, **kwargs) -> SampleFilter:
+def from_config(name: str, **kwargs) -> RowFilter:
     if name not in FILTER_REGISTRY:
         raise ValueError(
-            f'Unknown sample_filter "{name}". Must be one of: {list(FILTER_REGISTRY)}')
+            f'Unknown row_filter "{name}". Must be one of: {list(FILTER_REGISTRY)}')
     return FILTER_REGISTRY[name](**kwargs)

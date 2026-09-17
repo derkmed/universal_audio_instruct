@@ -147,7 +147,7 @@ all processing happens in the backend's `collate`:
    the left for generation.
 3. Build labels with the **prompt/full two-pass recipe**: the batch is processed
    a second time with only the prompt (including the generation header); each
-   sample's prompt token count (right padding ⇒ `attention_mask.sum()`) is
+   row's prompt token count (right padding ⇒ `attention_mask.sum()`) is
    masked to `-100` in the labels, as is padding. Only answer tokens contribute
    to the loss. The prompt pass reuses the *same audio* because processors
    expand the audio placeholder into a variable number of tokens based on the
