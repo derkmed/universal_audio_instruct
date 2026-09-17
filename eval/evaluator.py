@@ -1,6 +1,6 @@
 """Batched evaluation of a model backend over a run's rows.
 
-`Evaluator.evaluate(rows)` gives every row exactly one status, groups the rows by
+`Evaluator.evaluate(dataset)` gives every row of it exactly one status, groups the rows by
 (internal dataset, split, task), and reports each group's pass/fail and its one
 preliminary metric. A group passes when it has at least one row and every row is
 `ok`; metrics never decide that.
@@ -81,6 +81,20 @@ def print_group_table(summary: dict) -> None:
     widths = [max(len(line[i]) for line in lines) for i in range(len(columns))]
     for line in lines:
         print("  " + "  ".join(cell.ljust(width) for cell, width in zip(line, widths)))
+
+    # A split that came up short of the cap is a warning, not a failure: the
+    # groups can still pass and the run can still exit 0, so without saying so
+    # a truncated archive reads as an ordinary green run.
+    short = {
+        (group["originating_dataset"], group["split"]): group["clips_found"]
+        for group in summary["groups"]
+        if group["clips_per_split"] is not None
+        and group["clips_found"] is not None
+        and 0 < group["clips_found"] < group["clips_per_split"]
+    }
+    for (dataset, split), found in short.items():
+        print(f"  WARNING {dataset}/{split} found {found} clips, "
+              f"fewer than the {cap} asked for")
 
     for failure in summary["load_failures"]:
         print(f"  FAILED TO LOAD {failure['dataset']}: {failure['error']} "

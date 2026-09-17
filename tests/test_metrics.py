@@ -308,27 +308,68 @@ def test_a_failed_metric_load_can_be_retried_in_a_later_run() -> None:
         attempts.append(name)
         raise OSError("no route to host")
 
-    original_load, original_metric = metrics.hf_evaluate.load, metrics._wer_metric
-    metrics.hf_evaluate.load, metrics._wer_metric = _failing_load, None
+    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
+    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
+        _failing_load, None, None)
     try:
         row = _row("asr", transcription="a dog barks")
         for _ in range(3):
             try:
                 metrics.metric_value(row, "a dog barks")
-            except OSError:
+            except Exception:
                 pass
         assert len(attempts) == 1, attempts
 
         metrics.forget_failed_load()
         try:
             metrics.metric_value(row, "a dog barks")
-        except OSError:
+        except Exception:
             pass
         assert len(attempts) == 2, attempts
     finally:
-        metrics.hf_evaluate.load, metrics._wer_metric = original_load, original_metric
+        (metrics.hf_evaluate.load, metrics._wer_metric,
+         metrics._wer_load_error) = original
 
     print("PASS: a failed metric load can be retried in a later run.")
+
+
+def test_a_remembered_load_failure_does_not_hoard_the_rows_it_refused() -> None:
+    """Re-raising one exception object grows its traceback, and holds every row.
+
+    Each frame keeps its locals alive -- the row dict, and so the clip's decoded
+    audio bytes -- and nothing is released while the module holds the object. On
+    a capped run over 30-second clips that is hundreds of megabytes, in exactly
+    the offline kernel the tolerance exists to keep alive.
+    """
+    def _failing_load(name):
+        raise OSError("no route to host")
+
+    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
+    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
+        _failing_load, None, None)
+    try:
+        row = _row("asr", transcription="a dog barks")
+        raised = []
+        for _ in range(6):
+            try:
+                metrics.metric_value(row, "a dog barks")
+            except Exception as error:
+                raised.append(error)
+    finally:
+        (metrics.hf_evaluate.load, metrics._wer_metric,
+         metrics._wer_load_error) = original
+
+    # A fresh exception every time, so no traceback accumulates across the run.
+    assert len({id(error) for error in raised}) == len(raised), raised
+    depths = []
+    for error in raised[1:]:
+        depth, frame = 0, error.__traceback__
+        while frame is not None:
+            depth, frame = depth + 1, frame.tb_next
+        depths.append(depth)
+    assert max(depths) == min(depths), depths
+
+    print("PASS: a remembered load failure does not hoard the rows it refused.")
 
 
 def test_a_metric_that_will_not_load_is_only_attempted_once() -> None:
@@ -343,17 +384,19 @@ def test_a_metric_that_will_not_load_is_only_attempted_once() -> None:
         attempts.append(name)
         raise OSError("no route to host")
 
-    original_load, original_metric = metrics.hf_evaluate.load, metrics._wer_metric
-    metrics.hf_evaluate.load, metrics._wer_metric = _failing_load, None
+    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
+    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
+        _failing_load, None, None)
     try:
         row = _row("asr", transcription="a dog barks")
         for _ in range(5):
             try:
                 metrics.metric_value(row, "a dog barks")
-            except OSError:
+            except Exception:
                 pass
     finally:
-        metrics.hf_evaluate.load, metrics._wer_metric = original_load, original_metric
+        (metrics.hf_evaluate.load, metrics._wer_metric,
+         metrics._wer_load_error) = original
 
     assert len(attempts) == 1, attempts
 

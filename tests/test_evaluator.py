@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from eval.backends.base import ModelBackend  # noqa: E402
 from eval.config import EvalConfig  # noqa: E402
-from eval.evaluator import Evaluator  # noqa: E402
+from eval.evaluator import STATUSES, Evaluator  # noqa: E402
 from uad_data.load_report import (  # noqa: E402
     LoadedRows, LoadFailure, LoadReport, RenderFailure, SplitReport,
 )
@@ -460,6 +460,44 @@ def test_evaluate_returns_the_summary_plus_the_row_records() -> None:
     assert "predictions" not in returned and "references" not in returned, returned
 
     print("PASS: evaluate returns the summary plus the row records.")
+
+
+def test_a_split_that_came_up_short_of_the_cap_is_warned_about() -> None:
+    """The spec asks for a warning, and a `3/5` cell in an all-PASS table isn't one.
+
+    An operator whose archive was truncated otherwise sees Overall: PASS and
+    exit 0 with nothing calling it out.
+    """
+    import contextlib
+    import io as _io
+
+    from eval.evaluator import print_group_table
+
+    summary = {
+        "clips_per_split": 5,
+        "groups": [
+            {"originating_dataset": "Clotho", "split": "test", "task": "caption",
+             "clips_found": 3, "clips_per_split": 5, "rows": 3,
+             "statuses": {status: (3 if status == "ok" else 0) for status in STATUSES},
+             "metric": "wer", "metric_value": 0.0, "passed": True},
+            {"originating_dataset": "Clotho", "split": "train", "task": "caption",
+             "clips_found": 5, "clips_per_split": 5, "rows": 5,
+             "statuses": {status: (5 if status == "ok" else 0) for status in STATUSES},
+             "metric": "wer", "metric_value": 0.0, "passed": True},
+        ],
+        "load_failures": [],
+        "passed": True,
+    }
+
+    printed = _io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        print_group_table(summary)
+    warnings = [line for line in printed.getvalue().splitlines() if "WARNING" in line]
+
+    assert len(warnings) == 1, printed.getvalue()
+    assert "Clotho/test" in warnings[0] and "3" in warnings[0], warnings
+
+    print("PASS: a split that came up short of the cap is warned about.")
 
 
 def test_the_summary_can_be_printed_without_an_output_dir() -> None:
