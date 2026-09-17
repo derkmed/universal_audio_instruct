@@ -109,7 +109,7 @@ def _patched_hub(**fakes):
     prompts folder -- a temporary directory that is gone once the test ends.
     """
     originals = {name: getattr(hub, name) for name in fakes}
-    prompts_dir = prompts.PROMPTS_DIR
+    original_prompts_dir = prompts.PROMPTS_DIR
     for name, fake in fakes.items():
         setattr(hub, name, fake)
     try:
@@ -117,7 +117,7 @@ def _patched_hub(**fakes):
     finally:
         for name, original in originals.items():
             setattr(hub, name, original)
-        prompts.PROMPTS_DIR = prompts_dir
+        prompts.PROMPTS_DIR = original_prompts_dir
 
 
 class RejectAll(filters.SampleFilter):
