@@ -1,13 +1,15 @@
 """Offline end-to-end test for uad_data.loader.
 
-Builds a synthetic audio archive + metadata + prompt file, monkeypatches the Hub
-download functions so nothing touches the network, and asserts the loader emits
+Builds a synthetic audio archive + metadata + prompt file, temporarily swaps the
+Hub download functions for fakes so nothing touches the network (restoring them
+afterwards), and asserts the loader emits
 the same rows the old HF loading script would have -- including the
 (audio x task x prompt-template) expansion and independent (non-aliased) rows.
 
 Runnable directly (`python tests/test_loader.py`) or under pytest. Only requires
 `datasets`, `jinja2`, `huggingface_hub` -- not the heavy eval deps.
 """
+import contextlib
 import io
 import json
 import os
@@ -76,35 +78,52 @@ def _build_fixture(root: str) -> dict:
     }
 
 
-def _install_fakes(monkeypatch_targets: dict):
-    """Redirect hub.* to local fixture files instead of the network."""
+def _fake_hub(fx: dict) -> dict:
+    """Fake hub.* functions that serve local fixture files instead of the network."""
     def fake_download_file(path_or_url, *, repo_id=None, revision=None, token=None):
         base = os.path.basename(hub.to_repo_path(path_or_url))
         if base.endswith(".tar.gz"):
-            return monkeypatch_targets["tar_path"]
+            return fx["tar_path"]
         if base == "Clotho_test.json":
-            return monkeypatch_targets["metadata_path"]
+            return fx["metadata_path"]
         raise AssertionError(f"unexpected download_file for {path_or_url!r}")
 
     def fake_download_prompts_dir(*, repo_id=None, revision=None, token=None):
-        return monkeypatch_targets["prompts_dir"]
+        return fx["prompts_dir"]
 
-    hub.download_file = fake_download_file
-    hub.download_prompts_dir = fake_download_prompts_dir
-    # loader imported these names into its own module namespace via `from . import hub`
-    # so patching the hub module attributes is sufficient (loader calls hub.download_*).
+    return {
+        "download_file": fake_download_file,
+        "download_prompts_dir": fake_download_prompts_dir,
+    }
+
+
+@contextlib.contextmanager
+def _patched_hub(**fakes):
+    """Swap hub.* attributes for fakes, restoring the real ones on exit.
+
+    loader calls the functions through the module (`hub.download_file(...)`), so
+    patching the hub module's attributes is enough. Restoring them keeps one test's
+    fakes from leaking into later tests in the same pytest run.
+    """
+    originals = {name: getattr(hub, name) for name in fakes}
+    for name, fake in fakes.items():
+        setattr(hub, name, fake)
+    try:
+        yield
+    finally:
+        for name, original in originals.items():
+            setattr(hub, name, original)
 
 
 def test_load_expands_rows() -> None:
     with tempfile.TemporaryDirectory() as root:
         fx = _build_fixture(root)
-        _install_fakes(fx)
-
-        rows = loader.load_uad_dataset(
-            json_config_path=fx["config_path"],
-            split="test",
-            token=None,
-        )
+        with _patched_hub(**_fake_hub(fx)):
+            rows = loader.load_uad_dataset(
+                json_config_path=fx["config_path"],
+                split="test",
+                token=None,
+            )
 
     # 2 audios x 1 task (caption) x (1 sysinst x 1 prompt x 2 outputs) = 4 rows.
     assert len(rows) == 4, f"expected 4 rows, got {len(rows)}"
@@ -146,7 +165,7 @@ def test_max_samples_streams_prefix() -> None:
     """max_samples auto-enables the streaming archive path and stops early."""
     with tempfile.TemporaryDirectory() as root:
         fx = _build_fixture(root)
-        _install_fakes(fx)
+        fakes = _fake_hub(fx)
 
         calls = {"stream": 0, "download_tar": 0}
 
@@ -155,23 +174,25 @@ def test_max_samples_streams_prefix() -> None:
             return open(fx["tar_path"], "rb")
 
         # Detect any full-download of the archive so we can prove it was NOT used.
-        prev_download_file = hub.download_file
+        fixture_download_file = fakes["download_file"]
 
         def counting_download_file(path_or_url, *, repo_id=None, revision=None, token=None):
             if os.path.basename(hub.to_repo_path(path_or_url)).endswith(".tar.gz"):
                 calls["download_tar"] += 1
-            return prev_download_file(path_or_url, repo_id=repo_id, revision=revision, token=token)
+            return fixture_download_file(
+                path_or_url, repo_id=repo_id, revision=revision, token=token)
 
-        hub.open_archive_stream = fake_open_archive_stream
-        hub.download_file = counting_download_file
+        fakes["download_file"] = counting_download_file
+        fakes["open_archive_stream"] = fake_open_archive_stream
 
         # max_samples set -> stream defaults to True.
-        rows = loader.load_uad_dataset(
-            json_config_path=fx["config_path"],
-            split="test",
-            token=None,
-            max_samples=1,
-        )
+        with _patched_hub(**fakes):
+            rows = loader.load_uad_dataset(
+                json_config_path=fx["config_path"],
+                split="test",
+                token=None,
+                max_samples=1,
+            )
 
     assert len(rows) == 1, f"expected 1 row (capped), got {len(rows)}"
     assert calls["stream"] == 1, "streaming archive opener was not used"
