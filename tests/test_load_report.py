@@ -94,6 +94,28 @@ def test_smoke_run_records_a_task_with_no_prompt_file_as_render_failures() -> No
     print("PASS: a task with no prompt file fails each clip's render, and the clip counts.")
 
 
+def test_a_filtered_out_clip_does_not_count_when_its_task_has_no_prompt_file() -> None:
+    # _RejectClipsFilter drops t0 and t1; the fixture has no commonsense prompt file.
+    fx.filters.FILTER_REGISTRY["reject_clips"] = fx._RejectClipsFilter
+    try:
+        members = [f"test/t{i}.wav" for i in range(4)]
+        datasets = {"Clotho": {
+            "members": members,
+            "splits": {"test": [fx._clotho_record(p) for p in members]},
+        }}
+        config = {"name": "Clotho", "row_filter": "reject_clips", "datasets": [
+            {"name": "Clotho", "tasks": ["commonsense"], "splits": ["test"]}]}
+        rows, _ = fx._load(datasets, config, split="test", clips_per_split=2)
+    finally:
+        del fx.filters.FILTER_REGISTRY["reject_clips"]
+
+    assert [f.audio_path for f in rows.report.render_failures] == [
+        "test/t2.wav", "test/t3.wav"], rows.report.render_failures
+    assert rows.report.splits[0].clips_found == 2, rows.report.splits
+
+    print("PASS: a clip the row filter drops neither counts nor fails to render.")
+
+
 def test_regular_run_raises_on_a_render_failure() -> None:
     try:
         rows, _ = fx._load(_emns_without_category("emns/0.wav"), EMNS_CONFIG, split="train")
