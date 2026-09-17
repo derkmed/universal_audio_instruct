@@ -38,7 +38,7 @@ flowchart LR
         TRAIN["train/<br/>python -m train.main"]
     end
 
-    DATA -- "hf_hub_download,<br/>or lazy stream when max_samples" --> UAD
+    DATA -- "hf_hub_download,<br/>or lazy stream when clips_per_split" --> UAD
     PROMPTS --> UAD
     CONFIGS --> UAD
     UAD -- "rows: audio bytes +<br/>system_instruction / prompt / output" --> EVAL
@@ -139,12 +139,12 @@ For a dataset called `MyDataset`:
 5. **Test it**, then commit the registry entry and config. The offline tests
    don't read your data, but they import the registry, so they catch syntax
    errors in it. The smoke test runs against the Hub,
-   and `--max-samples` makes it stream the archive and stop early, so it
+   and `--clips-per-split` makes it stream the archive and stop early, so it
    downloads only the first part of the archive:
 
    ```bash
    python -m pytest tests
-   python -m eval.main --model GEMMA-4 --json-config configs/mydataset_config.json --split test --max-samples 5
+   python -m eval.main --model GEMMA-4 --json-config configs/mydataset_config.json --split test --clips-per-split 5
    ```
 
    Note that the evaluator currently computes a single WER over all rows,

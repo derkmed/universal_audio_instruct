@@ -13,7 +13,7 @@ pip install -r requirements.txt -r train/requirements.txt
 export HF_TOKEN=...
 
 # smoke test
-python -m train.main --model GEMMA-4 --max-samples 32 --epochs 1
+python -m train.main --model GEMMA-4 --clips-per-split 5 --epochs 1
 
 # real run (Gemma: LoRA on bf16 is the recommended default)
 python -m train.main --model GEMMA-4 --no-4bit \
