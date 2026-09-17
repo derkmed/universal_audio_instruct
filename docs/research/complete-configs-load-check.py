@@ -5,6 +5,17 @@ real `uad_data` code (config validation, metadata loading, prompt matching,
 `Sample.to_output`) against a LOCAL copy of the Hub dataset repo, plus a full
 pass over every audio archive's entry list.
 
+Known limitation (issue #20): this script predates per-utterance rendering (#14)
+and does not handle asr_timestamp_search, so don't trust its output for
+libricss, libricss_subseg or SparseLibriMix. It imports `uad_data` from the
+checkout it sits in, and from #14 on it misreports those datasets in two ways:
+  * it builds `Sample` without an `utterance_index`, so every
+    asr_timestamp_search row counts as a render error;
+  * `vars_not_in_features` compares template variables with `Task.features`
+    keys, so it flags `start_time`, `end_time` and `transcription`, which are
+    utterance fields.
+complete-1..5 don't use these datasets, so the default run is unaffected.
+
 Standard library only. `uad_data` imports three third-party packages that are
 not installed here, so this script registers minimal stand-ins in `sys.modules`
 BEFORE importing `uad_data`:
