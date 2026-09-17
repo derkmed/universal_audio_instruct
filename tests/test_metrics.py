@@ -281,6 +281,35 @@ def test_a_blank_reference_still_counts_its_row_in_a_wer_group() -> None:
     print("PASS: a blank-reference row still counts in its WER group.")
 
 
+def test_a_metric_that_will_not_load_is_only_attempted_once() -> None:
+    """The load runs per row, so a Hub outage must not cost every row a timeout.
+
+    Without remembering the failure, a 1000-row asr run makes 1000 load attempts,
+    each with its own retry budget, and prints 1000 identical complaints.
+    """
+    attempts = []
+
+    def _failing_load(name):
+        attempts.append(name)
+        raise OSError("no route to host")
+
+    original_load, original_metric = metrics.hf_evaluate.load, metrics._wer_metric
+    metrics.hf_evaluate.load, metrics._wer_metric = _failing_load, None
+    try:
+        row = _row("asr", transcription="a dog barks")
+        for _ in range(5):
+            try:
+                metrics.metric_value(row, "a dog barks")
+            except OSError:
+                pass
+    finally:
+        metrics.hf_evaluate.load, metrics._wer_metric = original_load, original_metric
+
+    assert len(attempts) == 1, attempts
+
+    print("PASS: a metric that will not load is only attempted once.")
+
+
 if __name__ == "__main__":
     for _name, _test in list(globals().items()):
         if _name.startswith("test_"):

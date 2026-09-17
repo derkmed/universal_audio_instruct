@@ -26,10 +26,20 @@ every row with a prediction, `ok` and `empty_output` alike. An answer that its
 rule reads as nothing is not excluded, it is simply judged by that rule -- a
 `commonsense_answer` with no choice letter has none to be started with, so the
 row misses; a `qa` answer with no numbers has none missing from the prediction,
-so the row hits. Two consequences are worth knowing when reading a number: a
-`qa` group of free-text answers reports a hit rate of 1.0, and a `commonsense`
-group whose answers carry no choice letters reports 0.0. These metrics are
-preliminary and never decide whether a group passes.
+so the row hits.
+
+Three consequences are worth knowing before reading one of these numbers, all of
+them the rules as decided rather than oversights:
+
+- a `qa` group of free-text answers reports a hit rate of 1.0, whatever the
+  model said, because no number of the answer's is missing;
+- a `commonsense` group whose answers carry no choice letters reports 0.0,
+  because there is no letter for a prediction to start with;
+- `commonsense` asks that the prediction *start with* the choice letter, so a
+  model answering "The answer is B." misses, and a group answering that way
+  reports 0.0.
+
+These metrics are preliminary and never decide whether a group passes.
 
 `metric_value` gives one row's value; `aggregate` gives a group's. A WER group is
 corpus-level -- one `wer.compute` over every row -- not the mean of the rows'
@@ -59,7 +69,8 @@ _CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])(?!\w)")
 _WORD_LETTERS = frozenset("ai")
 _MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])\s*(?:[^\w\s]|$)")
 
-# Loaded lazily and kept: `evaluate.load` reads from disk on every call.
+# Loaded lazily and kept, because `evaluate.load` reads from disk on every call:
+# the loaded metric, or the exception that loading it raised.
 _wer_metric = None
 
 
@@ -162,17 +173,11 @@ def metric_value(row: dict, prediction: str) -> Optional[float]:
     None only when the task has no metric, or when a WER row has no reference
     words of its own, which leaves that row's WER undefined. It still counts in
     its group -- see `aggregate`. Every hit-rate row has a value.
-    """
-    metric = _METRICS.get(row.get("task", ""))
-    if metric is None:
-        return None
 
-    reading = metric.read(answer_of(row))
-    if metric.hit is None:
-        if not reading:
-            return None  # no reference words, so no WER to divide
-        return _wer(predictions=[prediction], references=[reading])
-    return _hit(metric, reading, prediction)
+    A row is its own group of one, so the rule lives in `aggregate` alone and
+    cannot drift between the two.
+    """
+    return aggregate(row.get("task", ""), [(row, prediction)])
 
 
 def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[float]:
@@ -225,5 +230,14 @@ def _wer(*, predictions: list[str], references: list[str]) -> float:
     """Corpus WER. An empty prediction is every reference word deleted: WER 1.0."""
     global _wer_metric
     if _wer_metric is None:
-        _wer_metric = hf_evaluate.load(WER)
+        try:
+            _wer_metric = hf_evaluate.load(WER)
+        except Exception as error:
+            # Remember the failure. This runs once per row, so retrying a Hub
+            # that is down would cost every row of the run its own timeout and
+            # its own identical complaint.
+            _wer_metric = error
+            raise
+    if isinstance(_wer_metric, BaseException):
+        raise _wer_metric
     return float(_wer_metric.compute(predictions=predictions, references=references))

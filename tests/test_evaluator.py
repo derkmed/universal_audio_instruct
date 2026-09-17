@@ -88,10 +88,6 @@ ROWS = [
 ]
 
 
-def _report(**kwargs) -> LoadReport:
-    return LoadReport(**kwargs)
-
-
 def _run(rows, backend=None, **config) -> tuple[dict, list[dict], dict, object]:
     """Evaluate `rows` into a temp dir; give back summary, jsonl records, return value."""
     backend = EchoBackend() if backend is None else backend
@@ -252,8 +248,32 @@ def test_a_row_with_no_audio_at_all_is_an_audio_error() -> None:
     print("PASS: a row with no audio becomes audio_error, not a dead run.")
 
 
+def test_a_backend_returning_anything_but_strings_fails_its_batch() -> None:
+    """The backend's whole return contract is checked in one place.
+
+    A short list, a None in place of text, a number: each is the backend letting
+    its batch down, and each has to become model_error rather than an exception
+    escaping the loop and costing the run its summary.
+    """
+    class NoneBackend(ModelBackend):
+        def generate_batch(self, requests):
+            return [None] * len(requests)
+
+    class NumberBackend(ModelBackend):
+        def generate_batch(self, requests):
+            return [1.0] * len(requests)
+
+    for backend in (NoneBackend(), NumberBackend()):
+        summary, records, _, _ = _run(ROWS[:2], backend, clips_per_split=1)
+        assert [r["status"] for r in records] == ["model_error", "model_error"], records
+        assert all(r["error"] for r in records), records
+        assert summary["groups"], summary  # the run still produced its summary
+
+    print("PASS: a backend returning anything but strings fails its batch.")
+
+
 def test_a_row_that_failed_to_render_is_reported_from_the_load_report() -> None:
-    rows = LoadedRows([ROWS[0]], _report(
+    rows = LoadedRows([ROWS[0]], LoadReport(
         clips_per_split=1,
         splits=[SplitReport("Clotho", "test", ["caption"], clips_found=2)],
         render_failures=[RenderFailure(
@@ -291,7 +311,7 @@ def test_a_group_passes_only_when_every_row_is_ok() -> None:
 
 def test_a_group_with_no_rows_fails() -> None:
     """A selected split that yielded nothing still has its groups, and they fail."""
-    rows = LoadedRows([], _report(
+    rows = LoadedRows([], LoadReport(
         clips_per_split=5,
         splits=[SplitReport("Clotho", "test", ["caption", "asr"], clips_found=0)],
     ))
@@ -309,7 +329,7 @@ def test_a_group_with_no_rows_fails() -> None:
 
 
 def test_internal_datasets_that_failed_to_load_are_listed_and_fail_the_run() -> None:
-    rows = LoadedRows(list(ROWS), _report(
+    rows = LoadedRows(list(ROWS), LoadReport(
         clips_per_split=1,
         splits=[SplitReport("Clotho", split, ["caption"], clips_found=1)
                 for split in ("test", "train", "validation")],
@@ -352,7 +372,7 @@ def test_results_jsonl_keeps_todays_fields_and_adds_the_new_ones() -> None:
 
 
 def test_summary_json_has_one_entry_per_group_with_the_decided_fields() -> None:
-    rows = LoadedRows([ROWS[0]], _report(
+    rows = LoadedRows([ROWS[0]], LoadReport(
         clips_per_split=1,
         splits=[SplitReport("Clotho", "test", ["caption"], clips_found=1)]))
 

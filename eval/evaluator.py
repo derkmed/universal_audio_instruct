@@ -255,10 +255,12 @@ class Evaluator:
     ) -> tuple[Optional[List[str]], Optional[str]]:
         """One batch's predictions, or `(None, error)` when the backend let it down.
 
-        A backend that raises and one that returns the wrong number of
-        predictions are the same failure: this batch has no usable answers. Both
-        are caught here, so the rest of the loop can count on one prediction per
-        request. A regular run re-raises instead.
+        A backend that raises, one that returns the wrong number of predictions
+        and one that returns something other than text are all the same failure:
+        this batch has no usable answers. The backend's whole return contract is
+        checked here, in one place, so the rest of the loop can count on one
+        string per request and a misbehaving backend costs its batch rather than
+        the run. A regular run re-raises instead.
         """
         if not requests:
             return [], None
@@ -268,6 +270,13 @@ class Evaluator:
                 raise ValueError(
                     f"backend returned {len(predictions)} predictions "
                     f"for {len(requests)} requests")
+            # `None` is itself one of the wrong values, so the search can't use
+            # it as its "found nothing" marker.
+            wrong = [p for p in predictions if not isinstance(p, str)][:1]
+            if wrong:
+                raise TypeError(
+                    f"backend returned {type(wrong[0]).__name__}, "
+                    f"not text: {wrong[0]!r:.60}")
         except Exception as error:
             if not self.config.is_smoke_run:
                 raise  # a regular run stops at the first error
