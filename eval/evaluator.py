@@ -47,8 +47,6 @@ def _describe(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
-
-
 def print_group_table(summary: dict) -> None:
     """Print one line per group, then the overall result.
 
@@ -86,15 +84,16 @@ def print_group_table(summary: dict) -> None:
     # groups can still pass and the run can still exit 0, so without saying so
     # a truncated archive reads as an ordinary green run.
     short = {
-        (group["originating_dataset"], group["split"]): group["clips_found"]
+        (group["originating_dataset"], group["split"]):
+            (group["clips_found"], group["clips_per_split"])
         for group in summary["groups"]
         if group["clips_per_split"] is not None
         and group["clips_found"] is not None
-        and 0 < group["clips_found"] < group["clips_per_split"]
+        and group["clips_found"] < group["clips_per_split"]
     }
-    for (dataset, split), found in short.items():
+    for (dataset, split), (found, wanted) in short.items():
         print(f"  WARNING {dataset}/{split} found {found} clips, "
-              f"fewer than the {cap} asked for")
+              f"fewer than the {wanted} asked for")
 
     for failure in summary["load_failures"]:
         print(f"  FAILED TO LOAD {failure['dataset']}: {failure['error']} "
@@ -121,8 +120,8 @@ class Evaluator:
     def __init__(self, backend: ModelBackend, config: EvalConfig) -> None:
         self.backend = backend
         self.config = config
-        # Whether this run has already said a metric was unavailable.
-        self._metric_complained = False
+        # What this run has already said about unavailable metrics.
+        self._metric_complaints: set[str] = set()
 
     def _metric_or_none(self, metric_fn, *args):
         """A preliminary metric's value, or None if computing it failed.
@@ -134,16 +133,18 @@ class Evaluator:
         runner or a Hub blip would otherwise abort a smoke run built to tolerate
         far worse.
 
-        The complaint is made once per run: repeated per row it would bury the
-        GT/Pred output the run exists to produce.
+        Each distinct complaint is made once per run: repeated per row it would
+        bury the GT/Pred output the run exists to produce, but latching on the
+        first would hide a second, different fault behind it -- a rule raising
+        `TypeError` on an odd answer field, say, after the Hub had already failed.
         """
         try:
             return metric_fn(*args)
         except Exception as error:
-            if not self._metric_complained:
-                self._metric_complained = True
-                print(f"  metric unavailable, so this run reports none: "
-                      f"{_describe(error)}")
+            described = _describe(error)
+            if described not in self._metric_complaints:
+                self._metric_complaints.add(described)
+                print(f"  metric unavailable, so this run reports none: {described}")
             return None
 
     def evaluate(self, dataset) -> dict:
@@ -152,7 +153,7 @@ class Evaluator:
         # a metric that failed to load earlier gets another chance here, and this
         # run says so once if it fails again.
         metrics.forget_failed_load()
-        self._metric_complained = False
+        self._metric_complaints.clear()
         # `load_uad_dataset` returns rows carrying their load report. A caller
         # that hands over a plain list (the tests, the notebook) gets an empty one.
         report: LoadReport = getattr(dataset, "report", None) or LoadReport()
