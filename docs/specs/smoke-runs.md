@@ -485,7 +485,9 @@ slice assumes the ones before it.
 - S2 checks that `row_filter` is read, and that a config with `sample_filter`
   raises a `ValueError` naming `row_filter`.
 - Pin `docs/research/complete-configs-load-check.py` to commit `8f0b6f9` with a
-  header note; don't change its code.
+  header note; don't change its code. Keep the header's existing note ([#20])
+  that the script predates per-utterance rendering and doesn't handle
+  asr_timestamp_search.
 - In `MIGRATION.md`, rename `sample.py` to `row.py` in the module list, and add
   "(now `Row`)" where the history mentions `Sample`.
 
@@ -737,7 +739,7 @@ See [Acceptance](#acceptance).
   - [ ] `git grep -nw "Sample\|SampleFilter\|iter_samples\|include_sample\|sample_filter"`
     finds only `MIGRATION.md`'s history notes, each marked "(now `Row`)".
 - [ ] `docs/research/complete-configs-load-check.py` starts with a note pinning
-  it to commit `8f0b6f9`.
+  it to commit `8f0b6f9`, and still says it doesn't handle asr_timestamp_search.
 - [ ] Notebook cells 14–15 show the per-group table and a preview of
   `results["rows"]`, with rows that aren't `ok` listed first.
 - [ ] Smoke-run examples in `README.md`, `FINETUNING.md`, `train/README.md` and
@@ -796,3 +798,4 @@ See [Acceptance](#acceptance).
 [#12]: https://github.com/derkmed/universal_audio_instruct/issues/12
 [#14]: https://github.com/derkmed/universal_audio_instruct/pull/14
 [#18]: https://github.com/derkmed/universal_audio_instruct/issues/18
+[#20]: https://github.com/derkmed/universal_audio_instruct/issues/20
