@@ -25,6 +25,7 @@ Data should appear similar to as follows:
 ```
 """
 import argparse
+import copy
 import datasets
 import json
 import logging
@@ -66,26 +67,31 @@ class InternalDatasetJsonConfig:
         if not self.splits:
             logger.info(f'Splits unspecified for dataset: {self.name}.'
                         ' Defaulting to all splits.')
-            self.splits = complete_dataset.get_splits()
+            # Copy, so this config never holds (or hands out) the registry's own list.
+            self.splits = list(complete_dataset.get_splits())
 
     def toInternalDataset(self) -> InternalDataset:
 
         # All configurations are contextualized on the directory listing of this dataset.
         # Tasks and Splits must be a subset of those defined in this listing.
-        internal_dataset = internal_datasets.DATASETS_DIRECTORY[self.name]
+        complete_dataset = internal_datasets.DATASETS_DIRECTORY[self.name]
 
         # Verify that specified tasks are a subset of those available.
-        invalid_tasks = [t for t in self.tasks if t not in internal_dataset.tasks]
+        invalid_tasks = [t for t in self.tasks if t not in complete_dataset.tasks]
         if invalid_tasks:
-            raise ValueError(f'Task: {invalid_tasks} requested of {internal_dataset.name}, which'
-                             f'only contains tasks: {internal_dataset.tasks}')
-        internal_dataset.set_tasks(self.tasks)
+            raise ValueError(f'Task: {invalid_tasks} requested of {complete_dataset.name}, which '
+                             f'only contains tasks: {complete_dataset.tasks}')
         # Verify that specified splits are a subset of those available.
-        invalid_splits = [s for s in self.splits if s not in internal_dataset.get_splits()]
+        invalid_splits = [s for s in self.splits if s not in complete_dataset.get_splits()]
         if invalid_splits:
-            raise ValueError(f'Splits: {invalid_splits} requested of {internal_dataset.name}, which'
-                             f'only contains splits: {internal_dataset.get_splits()}')
-        internal_dataset.set_splits(self.splits)
+            raise ValueError(f'Splits: {invalid_splits} requested of {complete_dataset.name}, which '
+                             f'only contains splits: {complete_dataset.get_splits()}')
+
+        # Narrow a copy: the registry entry is process-wide, and narrowing it in place
+        # would leak this config's tasks/splits into every config loaded after it.
+        internal_dataset = copy.copy(complete_dataset)
+        internal_dataset.set_tasks(list(self.tasks))
+        internal_dataset.set_splits(list(self.splits))
 
         return internal_dataset
 
