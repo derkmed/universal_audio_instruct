@@ -239,7 +239,7 @@ DATASETS = [
         description=(
             'URDU dataset contains emotional clips of Urdu speech gathered from Urdu '
             'talk shows. It contains 400 clips of four basic emotions: Angry, Happy, '
-            'Neutral, and Emotion. There are 38 speakers (27 male and 11 female).'
+            'Neutral, and Sad. There are 38 speakers (27 male and 11 female).'
         ),
         tasks=Task.CLASSIFICATION,
         splits=datasets.Split.TRAIN,
