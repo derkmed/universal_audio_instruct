@@ -12,6 +12,7 @@ Reuses the synthetic archives of `test_loader_splits.py`. Runnable directly
 """
 import hashlib
 import io
+import json
 import os
 import sys
 import tarfile
@@ -221,16 +222,79 @@ def test_file_sha256_raises_for_a_missing_or_non_lfs_file() -> None:
     print("PASS: file_sha256 raises for a missing file and for a non-LFS file.")
 
 
-def test_file_sha256s_reads_several_paths_in_one_request() -> None:
-    a, b = "data/Clotho/Clotho.tar.gz", "data/EMNS/EMNS.tar.gz"
-    files = {a: _repo_file(a, "ab" * 32), b: _repo_file(b, "cd" * 32)}
+def test_file_versions_reads_several_paths_in_one_request() -> None:
+    archive, metadata = "data/Clotho/Clotho.tar.gz", "data/Clotho/Clotho_test.json"
+    files = {archive: _repo_file(archive, "ab" * 32), metadata: _repo_file(metadata, None)}
 
-    shas = _with_fake_api(files, lambda: hub.file_sha256s([a, b, "smoke/gone.tar.gz"]))
+    versions = _with_fake_api(
+        files, lambda: hub.file_versions([archive, metadata, "smoke/gone.tar.gz"]))
 
-    assert shas == {a: "ab" * 32, b: "cd" * 32}, shas
+    # An LFS file's version is its sha256; any other file's is its git blob id.
+    assert versions == {archive: "ab" * 32, metadata: "blob"}, versions
     assert len(_FakeApi.calls) == 1, _FakeApi.calls
 
-    print("PASS: file_sha256s reads several LFS sha256s in one request, leaving out missing paths.")
+    print("PASS: file_versions reads several files' versions in one request, leaving out missing ones.")
+
+
+class _BuildHub:
+    """Serves one internal dataset's metadata, archive sha256 and file versions."""
+
+    def __init__(self, metadata: dict[str, str], versions: dict[str, str], sha256: str) -> None:
+        self.metadata, self.versions, self.sha256 = metadata, versions, sha256
+
+    def download_file(self, path_or_url: str, **kwargs: object) -> str:
+        return self.metadata[hub.to_repo_path(path_or_url)]
+
+    def file_sha256(self, path_or_url: str, **kwargs: object) -> str:
+        return self.sha256
+
+    def file_versions(self, paths_or_urls: list[str], **kwargs: object) -> dict[str, str]:
+        return {p: self.versions[p] for p in map(hub.to_repo_path, paths_or_urls)
+                if p in self.versions}
+
+
+def _build_emns(versions: dict[str, str]) -> smoke.SmokeEntry:
+    """Run build_one for EMNS (train only) from a local copy, with a faked Hub."""
+    emns = internal_datasets.DATASETS_DIRECTORY["EMNS"]
+    members = [f"emns/{i}.wav" for i in range(3)]
+    with tempfile.TemporaryDirectory() as root:
+        _write(root, hub.to_repo_path(emns.data_url), _archive(members))
+        metadata_path = os.path.join(root, "EMNS_train.json")
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps([{"audio_path": p} for p in members]))
+        fake = _BuildHub({"data/EMNS/EMNS_train.json": metadata_path}, versions, "ab" * 32)
+        options = build_smoke_archives.BuildOptions(
+            clips_per_split=2, output_dir=root, source_dir=root,
+            repo_id=hub.DEFAULT_REPO_ID, revision="abc123", token=None)
+        originals = {n: getattr(hub, n) for n in ("download_file", "file_sha256", "file_versions")}
+        for name in originals:
+            setattr(hub, name, getattr(fake, name))
+        try:
+            return build_smoke_archives.build_one(emns, options)
+        finally:
+            for name, original in originals.items():
+                setattr(hub, name, original)
+
+
+def test_build_one_records_each_splits_metadata_version() -> None:
+    entry = _build_emns({"data/EMNS/EMNS_train.json": "v-train"})
+
+    assert entry.metadata_versions == {"train": "v-train"}, entry
+    assert (entry.source_sha256, entry.revision, entry.clips) == (
+        "ab" * 32, "abc123", {"train": 2}), entry
+
+    print("PASS: build_one records the version of each split's metadata it built from.")
+
+
+def test_build_one_refuses_metadata_missing_from_the_hub() -> None:
+    try:
+        _build_emns({})
+    except hub.EntryNotFoundError as e:
+        assert "EMNS_train.json" in str(e), e
+    else:
+        raise AssertionError("expected EntryNotFoundError for missing metadata")
+
+    print("PASS: build_one raises when a split's metadata has no version on the Hub.")
 
 
 class _ShaHub:
@@ -281,10 +345,12 @@ def test_manifest_round_trips() -> None:
     entries = {
         "Clotho": smoke.SmokeEntry(
             clips_per_split=10, clips={"train": 10, "test": 10},
-            source_sha256="ab" * 32, revision="abc123"),
+            source_sha256="ab" * 32, metadata_versions={"train": "11" * 32, "test": "blob"},
+            revision="abc123"),
         "MLEnd_Intonation": smoke.SmokeEntry(
             clips_per_split=10, clips={"train": 7, "validation": 0},
-            source_sha256="cd" * 32, revision="abc123", error="EOFError: cut"),
+            source_sha256="cd" * 32, metadata_versions={"train": "22" * 32},
+            revision="abc123", error="EOFError: cut"),
     }
     with tempfile.TemporaryDirectory() as root:
         path = os.path.join(root, "manifest.json")

@@ -20,7 +20,9 @@ The command writes `<output-dir>/<name>.tar.gz` for each internal dataset, plus
 Source archives come from the Hub by default, streamed at the current commit of
 `main`. With `--source-dir`, they're read from a local copy laid out like the
 Hub repo, and the command refuses to build unless each local archive's sha256
-matches the Hub's current one. Metadata always comes from the Hub at that commit.
+matches the Hub's current one. Metadata always comes from the Hub at that commit,
+and the manifest records each split's metadata version, so the loader can tell
+when a re-split makes a smoke archive stale.
 """
 import argparse
 import contextlib
@@ -161,12 +163,14 @@ def build_one(internal_dataset: InternalDataset, options: BuildOptions) -> smoke
     source_sha256 = hub.file_sha256(
         internal_dataset.data_url, repo_id=options.repo_id,
         revision=options.revision, token=options.token)
+    metadata_versions = _metadata_versions(internal_dataset, options)
     path = os.path.join(options.output_dir, f"{internal_dataset.name}.tar.gz")
     with _open_source(internal_dataset, options) as source, open(path, "wb") as destination:
         build = write_smoke_archive(source, split_paths, options.clips_per_split, destination)
     return smoke.SmokeEntry(
         clips_per_split=options.clips_per_split, clips=build.clips,
-        source_sha256=source_sha256, revision=options.revision, error=build.error)
+        source_sha256=source_sha256, metadata_versions=metadata_versions,
+        revision=options.revision, error=build.error)
 
 
 def _split_paths(internal_dataset: InternalDataset, options: BuildOptions) -> dict[str, list[str]]:
@@ -179,6 +183,22 @@ def _split_paths(internal_dataset: InternalDataset, options: BuildOptions) -> di
         with open(metadata_path, encoding="utf-8") as f:
             paths[str(split)] = [record["audio_path"] for record in json.load(f)]
     return paths
+
+
+def _metadata_versions(internal_dataset: InternalDataset, options: BuildOptions) -> dict[str, str]:
+    """Each registered split's metadata JSON version on the Hub at the build's commit.
+
+    Raises `EntryNotFoundError` when a split's metadata has no version there.
+    """
+    paths = {str(split): hub.to_repo_path(internal_dataset.split_metadata_path(split))
+             for split in internal_dataset.get_splits()}
+    versions = hub.file_versions(
+        list(paths.values()), repo_id=options.repo_id,
+        revision=options.revision, token=options.token)
+    missing = [path for path in paths.values() if path not in versions]
+    if missing:
+        raise hub.EntryNotFoundError(f"No version on the Hub at {options.revision} for {missing}.")
+    return {split: versions[path] for split, path in paths.items()}
 
 
 @contextlib.contextmanager
