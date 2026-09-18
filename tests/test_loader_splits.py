@@ -13,6 +13,7 @@ Runnable directly (`python tests/test_loader_splits.py`) or under pytest. Only
 requires `datasets`, `jinja2`, `huggingface_hub`.
 """
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -123,20 +124,58 @@ class _CountingReader(io.RawIOBase):
 
 
 class _FakeHub:
-    """Serves fixture files by basename and records every archive open."""
+    """Serves fixture files by basename and records every archive open.
+
+    Paths under `smoke/` are served from the fixture's optional `smoke` map,
+    keyed by repo path; any other `smoke/` path is not on this Hub. A file's Hub
+    version (an archive's LFS sha256, a metadata JSON's version) is the sha256 of
+    its fixture file, unless the fixture's `versions` map, keyed by basename,
+    overrides it; an override of None means the file is gone from the Hub.
+    """
 
     def __init__(self, fx: dict):
         self.fx = fx
         self.opens: list[str] = []
         self.reads: dict[str, dict] = {}
+        self.downloads: list[str] = []
+        self.version_checks: list[str] = []
+        self.version_requests = 0
 
     def download_file(self, path_or_url, *, repo_id=None, revision=None, token=None):
-        base = os.path.basename(hub.to_repo_path(path_or_url))
+        path = hub.to_repo_path(path_or_url)
+        self.downloads.append(path)
+        if path.startswith("smoke/"):
+            return self._smoke_file(path)
+        base = os.path.basename(path)
         if base not in self.fx["files"]:
             raise AssertionError(f"unexpected download_file for {path_or_url!r}")
         if base.endswith(".tar.gz"):
             self.opens.append(base)
         return self.fx["files"][base]
+
+    def _smoke_file(self, path: str) -> str:
+        smoke = self.fx.get("smoke", {})
+        if path not in smoke:
+            raise hub.EntryNotFoundError(f"{path} is not on the Hub")
+        if path.endswith(".tar.gz"):
+            self.opens.append(path)
+        return smoke[path]
+
+    def file_versions(self, paths_or_urls, *, repo_id=None, revision=None, token=None):
+        self.version_requests += 1
+        versions = {}
+        for path_or_url in paths_or_urls:
+            path = hub.to_repo_path(path_or_url)
+            base = os.path.basename(path)
+            self.version_checks.append(base)
+            version = self.fx.get("versions", {}).get(base, self._own_sha256(base))
+            if version is not None:
+                versions[path] = version
+        return versions
+
+    def _own_sha256(self, base: str) -> str:
+        with open(self.fx["files"][base], "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
 
     def open_archive_stream(self, path_or_url, *, repo_id=None, revision=None, token=None):
         base = os.path.basename(hub.to_repo_path(path_or_url))
@@ -151,7 +190,7 @@ class _FakeHub:
 @contextlib.contextmanager
 def _patched_hub(fake: _FakeHub):
     """Swap hub.* for the fake's methods, restoring them and PROMPTS_DIR on exit."""
-    names = ("download_file", "open_archive_stream", "download_prompts_dir")
+    names = ("download_file", "open_archive_stream", "download_prompts_dir", "file_versions")
     originals = {name: getattr(hub, name) for name in names}
     original_prompts_dir = prompts.PROMPTS_DIR
     for name in names:

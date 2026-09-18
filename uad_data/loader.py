@@ -26,10 +26,12 @@ failed to render. A smoke run (`clips_per_split` set) records those failures and
 carries on; a regular run raises on the first one. Splits that end with fewer
 clips than the cap log a warning.
 
-The archive is read one of two ways (see `_open_archive`): fully downloaded and
-cached via `hub.download_file` (default), or lazily streamed via
-`hub.open_archive_stream` so that stopping early (with `clips_per_split`) only
-transfers the compressed prefix of the archive.
+Each internal dataset's archive comes from one of three places (see
+`_archive_sources`): its full archive, downloaded and cached (a regular run); its
+smoke archive `smoke/<name>.tar.gz`, downloaded and cached (a smoke run, when a
+fresh one holds enough clips); or its full archive streamed lazily over HTTP, so
+that stopping early transfers only the compressed prefix (a smoke run that can't
+use a smoke archive). An explicit `stream` overrides the choice.
 """
 import contextlib
 import glob
@@ -39,12 +41,16 @@ import logging
 import random
 import tarfile
 import zlib
+from dataclasses import dataclass
 from typing import Any, Iterator
 
 import datasets
 
+from . import filters as filters_lib
 from . import hub
 from . import prompts as prompts_lib
+from . import smoke
+from .clip_quota import ClipQuota, WantedClip, wanted_clips
 from .collection import UadCollection
 from .internal_dataset import InternalDataset
 from .json_config_loader import UniversalJsonConfig
@@ -152,17 +158,41 @@ def _get_prompt_templates(task: Task, rng: random.Random | None):
     return task_prompt_file.all_templates
 
 
+@dataclass
+class ArchiveSource:
+    """Where to read one internal dataset's clips from.
+
+    `path` is a repo path or URL: the full archive, or a smoke archive. `stream`
+    reads it lazily over HTTP instead of downloading and caching it.
+    `recorded_error` is the read error that stopped a smoke archive's build, if
+    one did.
+    """
+    path: str
+    stream: bool
+    recorded_error: str | None = None
+
+
+class RecordedLoadError(OSError):
+    """A smoke archive ended where its build hit a read error, short of what a run wants.
+
+    A full-archive run would hit that error there, so the smoke run reports it
+    as a failed load, with the error the build recorded.
+    """
+
+
 @contextlib.contextmanager
-def _open_archive(data_url: str, *, stream: bool, repo_id: str, revision, token):
+def _open_archive(
+    source: ArchiveSource, *, repo_id: str, revision: str | None, token: str | None,
+) -> Iterator[tarfile.TarFile]:
     """Yield a streaming tar handle for an internal dataset's audio archive.
 
-    stream=False downloads (and caches) the whole `.tar.gz` first; stream=True
-    reads it lazily over HTTP so an early break transfers only the prefix consumed.
-    Either way the caller gets a sequential `r|gz` tar object.
+    Without `source.stream` the whole `.tar.gz` is downloaded (and cached) first;
+    with it, it's read lazily over HTTP so an early break transfers only the
+    prefix consumed. Either way the caller gets a sequential `r|gz` tar object.
     """
-    if stream:
+    if source.stream:
         fileobj = hub.open_archive_stream(
-            data_url, repo_id=repo_id, revision=revision, token=token)
+            source.path, repo_id=repo_id, revision=revision, token=token)
         try:
             with tarfile.open(fileobj=fileobj, mode="r|gz") as archive:
                 yield archive
@@ -170,9 +200,155 @@ def _open_archive(data_url: str, *, stream: bool, repo_id: str, revision, token)
             fileobj.close()
     else:
         tar_path = hub.download_file(
-            data_url, repo_id=repo_id, revision=revision, token=token)
+            source.path, repo_id=repo_id, revision=revision, token=token)
         with tarfile.open(tar_path, "r|gz") as archive:
             yield archive
+
+
+def _archive_sources(
+    collection: UadCollection,
+    internal_datasets: list[InternalDataset],
+    *,
+    clips_per_split: int | None,
+    stream: bool | None,
+    repo_id: str,
+    revision: str | None,
+    token: str | None,
+) -> dict[str, ArchiveSource]:
+    """Choose each internal dataset's archive source, keyed by its name.
+
+    An explicit `stream` reads the full archive as asked. A regular run
+    downloads it. A smoke run uses a fresh smoke archive holding at least
+    `clips_per_split` clips per split when the row filter is `all_pass`, and
+    otherwise streams the full archive, with a log line.
+    """
+    if stream is not None or clips_per_split is None:
+        return {d.name: ArchiveSource(d.data_url, stream=bool(stream))
+                for d in internal_datasets}
+    if not isinstance(collection.row_filter, filters_lib.AllPassFilter):
+        for d in internal_datasets:
+            logger.info(
+                "Streaming the full archive of %s: smoke archives hold the first clips "
+                "whatever the row filter, so they only serve the all_pass filter.", d.name)
+        return {d.name: ArchiveSource(d.data_url, stream=True) for d in internal_datasets}
+    manifest = _smoke_manifest(repo_id=repo_id, revision=revision, token=token)
+    fitting = {
+        d.name: manifest[d.name] for d in internal_datasets
+        if _smoke_fits(d.name, manifest.get(d.name), clips_per_split)
+    }
+    current = _current_versions(
+        [d for d in internal_datasets if d.name in fitting],
+        repo_id=repo_id, revision=revision, token=token)
+    return {d.name: _smoke_or_stream(d, fitting.get(d.name), current)
+            for d in internal_datasets}
+
+
+def _smoke_manifest(*, repo_id: str, revision: str | None, token: str | None,
+                    ) -> dict[str, smoke.SmokeEntry]:
+    """The Hub's smoke manifest, or no entries when there is none or it can't be used.
+
+    No manifest on the Hub is logged; one that can't be fetched (the Hub is
+    unreachable and it isn't cached, say) or can't be read gets a warning.
+    """
+    try:
+        path = hub.download_file(
+            smoke.MANIFEST_PATH, repo_id=repo_id, revision=revision, token=token)
+        return smoke.read_manifest(path)
+    except hub.LocalEntryNotFoundError as error:
+        problem = error
+    except hub.EntryNotFoundError as error:
+        logger.info("No smoke manifest (%s); smoke runs read full archives.", error)
+        return {}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problem = error
+    logger.warning(
+        "Could not use the smoke manifest, so smoke runs read full archives: %s",
+        describe_error(problem))
+    return {}
+
+
+def _smoke_fits(name: str, entry: smoke.SmokeEntry | None, clips_per_split: int) -> bool:
+    """Whether an internal dataset has a smoke archive holding enough clips, logging why not."""
+    if entry is None:
+        logger.info("Streaming the full archive of %s: it has no smoke archive.", name)
+        return False
+    if clips_per_split > entry.clips_per_split:
+        logger.info(
+            "Streaming the full archive of %s: its smoke archive holds %d clips per "
+            "split, fewer than the %d asked for.", name, entry.clips_per_split, clips_per_split)
+        return False
+    return True
+
+
+def _metadata_paths(internal_dataset: InternalDataset) -> dict[str, str]:
+    """Split -> repo path of its metadata JSON, for each split the run config lists."""
+    return {str(split): hub.to_repo_path(internal_dataset.split_metadata_path(split))
+            for split in internal_dataset.get_splits()}
+
+
+def _current_versions(
+    internal_datasets: list[InternalDataset],
+    *,
+    repo_id: str,
+    revision: str | None,
+    token: str | None,
+) -> dict[str, str] | None:
+    """Repo path -> current Hub version of each full archive and listed metadata JSON.
+
+    One metadata request covers every internal dataset. A file that's gone from
+    the Hub is left out. Returns None, with a warning, when the request can't be
+    answered (offline, a network or HTTP error): the smoke archives are then used
+    anyway. Anything else, such as a bug, raises.
+    """
+    if not internal_datasets:
+        return {}
+    paths = []
+    for d in internal_datasets:
+        paths += [hub.to_repo_path(d.data_url), *_metadata_paths(d).values()]
+    try:
+        return hub.file_versions(paths, repo_id=repo_id, revision=revision, token=token)
+    except hub.REQUEST_ERRORS as error:
+        logger.warning(
+            "Could not check whether the smoke archives of %s are stale, so using them "
+            "anyway: %s", ", ".join(d.name for d in internal_datasets), describe_error(error))
+        return None
+
+
+def _stale_parts(
+    internal_dataset: InternalDataset, entry: smoke.SmokeEntry, current: dict[str, str],
+) -> list[str]:
+    """What changed on the Hub since the smoke build: the archive, and splits' metadata."""
+    changed = []
+    if current.get(hub.to_repo_path(internal_dataset.data_url)) != entry.source_sha256:
+        changed.append("the full archive")
+    for split, path in _metadata_paths(internal_dataset).items():
+        recorded = entry.metadata_versions.get(split)
+        if recorded is None or current.get(path) != recorded:
+            changed.append(f"the {split} metadata")
+    return changed
+
+
+def _smoke_or_stream(
+    internal_dataset: InternalDataset,
+    entry: smoke.SmokeEntry | None,
+    current: dict[str, str] | None,
+) -> ArchiveSource:
+    """An internal dataset's smoke archive when it fits and is fresh, else its streamed full archive.
+
+    `current` holds the Hub's current file versions; None means the check
+    couldn't run, so a fitting smoke archive counts as fresh.
+    """
+    name = internal_dataset.name
+    if entry is None:
+        return ArchiveSource(internal_dataset.data_url, stream=True)
+    changed = [] if current is None else _stale_parts(internal_dataset, entry, current)
+    if changed:
+        logger.warning(
+            "Streaming the full archive of %s: its smoke archive is stale, because %s "
+            "changed or went since it was built.", name, " and ".join(changed))
+        return ArchiveSource(internal_dataset.data_url, stream=True)
+    return ArchiveSource(
+        smoke.smoke_archive_path(name), stream=False, recorded_error=entry.error)
 
 
 def _iter_rows(
@@ -184,7 +360,7 @@ def _iter_rows(
     token: str | None,
     clips_per_split: int | None = None,
     seed: int = 42,
-    stream: bool = False,
+    stream: bool | None = None,
     report: LoadReport | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield expanded row dicts for the requested splits, one archive read per internal dataset.
@@ -213,6 +389,10 @@ def _iter_rows(
     if not selections:
         raise ValueError(
             f"No internal dataset in run config {collection.name!r} lists split {split!r}.")
+    sources = _archive_sources(
+        collection, [internal_dataset for internal_dataset, _ in selections],
+        clips_per_split=clips_per_split, stream=stream,
+        repo_id=repo_id, revision=revision, token=token)
 
     for internal_dataset, selected in selections:
         found = {
@@ -224,9 +404,9 @@ def _iter_rows(
         if report is not None:
             report.splits.extend(found.values())
         dataset_rows = _dataset_rows(
-            collection, internal_dataset, found,
+            collection, internal_dataset, found, sources[internal_dataset.name],
             repo_id=repo_id, revision=revision, token=token,
-            clips_per_split=clips_per_split, seed=seed, stream=stream,
+            clips_per_split=clips_per_split, seed=seed,
             render_failures=report.render_failures if tolerant else None)
         if tolerant:
             yield from _rows_until_failure(dataset_rows, internal_dataset.name, report)
@@ -263,15 +443,20 @@ def _rows_until_failure(
                 dataset, rows_kept, error)
             report.load_failures.append(LoadFailure(
                 dataset=dataset,
-                error=_describe(error),
+                error=describe_error(error),
                 rows_kept=rows_kept))
             break
         yield row
         rows_kept += 1
 
 
-def _describe(error: Exception) -> str:
-    """An error as the load report records it."""
+def describe_error(error: Exception) -> str:
+    """An error as the load report and the smoke manifest record it.
+
+    A recorded build error is already described, so it's given as recorded.
+    """
+    if isinstance(error, RecordedLoadError):
+        return str(error)
     return f"{type(error).__name__}: {error}"
 
 
@@ -279,71 +464,81 @@ def _dataset_rows(
     collection: UadCollection,
     internal_dataset: InternalDataset,
     found: dict[str, SplitReport],
+    source: ArchiveSource,
     *,
     repo_id: str,
     revision: str | None,
     token: str | None,
     clips_per_split: int | None,
     seed: int,
-    stream: bool,
     render_failures: list[RenderFailure] | None,
 ) -> Iterator[dict[str, Any]]:
     """Yield one internal dataset's rows from one archive read, counting clips in `found`.
 
-    `found` maps each selected split to its report entry.
+    `found` maps each selected split to its report entry. When `source` is a
+    smoke archive whose build hit a read error, and a selected split still wants
+    clips at its end, raises `RecordedLoadError`: a full-archive read would have
+    hit that error there.
     """
     randomize = collection.is_random_prompt_format_selection()
-    # audio_path -> {split: record}, over every selected split.
+    clips = _merged_metadata(
+        internal_dataset, list(found), repo_id=repo_id, revision=revision, token=token)
+    quota = ClipQuota(
+        {split_name: [path for path, records in clips.items() if split_name in records]
+         for split_name in found},
+        clips_per_split)
+
+    for clip in _read_wanted_clips(
+            source, quota, repo_id=repo_id, revision=revision, token=token):
+        for split_name in clip.splits:
+            rows, counts = _clip_rows(
+                collection, internal_dataset, split_name, clip.audio_path,
+                clip.data, clips[clip.audio_path][split_name], randomize, seed,
+                render_failures)
+            yield from rows
+            if counts:
+                quota.count(split_name)
+                found[split_name].clips_found = quota.found(split_name)
+
+    if source.recorded_error and not quota.all_satisfied():
+        raise RecordedLoadError(source.recorded_error)
+
+
+def _merged_metadata(
+    internal_dataset: InternalDataset,
+    splits: list[str],
+    *,
+    repo_id: str,
+    revision: str | None,
+    token: str | None,
+) -> dict[str, dict[str, Any]]:
+    """audio_path -> {split: record}, over the metadata of every split in `splits`."""
     clips: dict[str, dict[str, Any]] = {}
-    for split_name in found:
+    for split_name in splits:
         metadata_path = hub.download_file(
             internal_dataset.split_metadata_path(datasets.Split(split_name)),
             repo_id=repo_id, revision=revision, token=token)
         for audio_path, record in _load_split_metadata(
                 metadata_path, internal_dataset.tasks).items():
             clips.setdefault(audio_path, {})[split_name] = record
+    return clips
 
-    # Clips each split lists that the archive hasn't reached yet.
-    unread = {split_name: set() for split_name in found}
-    for audio_path, records in clips.items():
-        for split_name in records:
-            unread[split_name].add(audio_path)
 
-    def satisfied(split_name: str) -> bool:
-        return not unread[split_name] or (
-            clips_per_split is not None and found[split_name].clips_found >= clips_per_split)
+def _read_wanted_clips(
+    source: ArchiveSource,
+    quota: ClipQuota,
+    *,
+    repo_id: str,
+    revision: str | None,
+    token: str | None,
+) -> Iterator[WantedClip]:
+    """Open `source` and yield the clips `quota` still wants, stopping once it wants none.
 
-    # Read the archive as a sequential stream (archives are multi-GB); with
-    # stream=True only the prefix up to the early-stop point is downloaded.
-    with _open_archive(
-        internal_dataset.data_url, stream=stream,
-        repo_id=repo_id, revision=revision, token=token,
-    ) as archive:
-        for member in archive:
-            if all(satisfied(split_name) for split_name in found):
-                break
-            if not member.isfile() or member.name not in clips:
-                continue
-            wanted = [
-                (split_name, record)
-                for split_name, record in clips[member.name].items()
-                if not satisfied(split_name)
-            ]
-            for split_name in clips[member.name]:
-                unread[split_name].discard(member.name)
-            if not wanted:
-                continue
-            extracted = archive.extractfile(member)
-            if extracted is None:
-                continue
-            file_bytes = extracted.read()
-            for split_name, record in wanted:
-                rows, counts = _clip_rows(
-                    collection, internal_dataset, split_name, member.name,
-                    file_bytes, record, randomize, seed, render_failures)
-                yield from rows
-                if counts:
-                    found[split_name].clips_found += 1
+    The archive is read as a sequential stream (archives are multi-GB); a
+    streamed source transfers only the prefix up to the early-stop point.
+    """
+    with _open_archive(source, repo_id=repo_id, revision=revision, token=token) as archive:
+        yield from wanted_clips(archive, quota)
 
 
 def _clip_rows(
@@ -371,7 +566,7 @@ def _clip_rows(
             raise error
         failure = RenderFailure(
             dataset=internal_dataset.name, split=split, task=task.value,
-            audio_path=audio_path, error=_describe(error),
+            audio_path=audio_path, error=describe_error(error),
             utterance_index=utterance_index)
         logger.warning(
             "Failed to render a %s %s %s row for %s (utterance %s); moving on: %s",
@@ -440,11 +635,15 @@ def load_uad_dataset(
         seed: Seeds each row's template pick when the run config sets
             `randomize_prompt_format`. A row gets the same pick in every run
             with the same seed.
-        stream: Read audio archives lazily over HTTP instead of downloading them
-            in full, so an early stop transfers only the prefix consumed. Defaults
-            to True when `clips_per_split` is set and False otherwise -- regular runs
-            prefer the cached download. Streamed reads are not cached, so avoid
-            stream=True for large or repeated runs.
+        stream: Leave unset (None) to let the loader choose where each archive
+            is read from: a regular run downloads and caches the full archive; a
+            smoke run (`clips_per_split` set) downloads a fresh smoke archive
+            (`smoke/<name>.tar.gz`) that holds enough clips when the run config's
+            row filter is `all_pass`, and otherwise streams the full archive, so
+            an early stop transfers only the prefix consumed. True or False
+            bypasses smoke archives and streams, or downloads, the full archive:
+            the way to check a smoke run against the real archive. Streamed reads
+            are not cached, so avoid stream=True for large or repeated runs.
 
     Returns:
         The row dicts, consumable directly by the Evaluator, as a list whose
@@ -452,8 +651,6 @@ def load_uad_dataset(
     """
     if clips_per_split is not None and clips_per_split < 1:
         raise ValueError(f"clips_per_split must be a positive integer, got {clips_per_split}.")
-    if stream is None:
-        stream = clips_per_split is not None
 
     config_path = _resolve_config_path(
         json_config_path, repo_id=repo_id, revision=revision, token=token)

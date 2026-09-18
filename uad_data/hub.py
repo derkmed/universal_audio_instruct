@@ -4,12 +4,29 @@ This replaces the loading script's `dl_manager` downloads and the
 `_ensure_hub_resources()` shim. Everything here uses `huggingface_hub` to pull
 plain files -- there is no `trust_remote_code` and no executable dataset script
 on the Hub. Assets fetched: per-dataset audio archives (`data/<name>/<name>.tar.gz`),
-per-split metadata JSONs, prompt templates (`prompts/*.json`), and named configs
-(`universal_audio_dataset_configs/*.json`).
+per-split metadata JSONs, prompt templates (`prompts/*.json`), named configs
+(`universal_audio_dataset_configs/*.json`), and smoke archives with their manifest
+(`smoke/`). It also reads files' versions (an LFS file's sha256) and the current
+commit of a branch.
+
+A file that isn't on the Hub raises `EntryNotFoundError`. So does one that can't
+be fetched because the Hub is unreachable and it isn't cached: that raises the
+subclass `LocalEntryNotFoundError`. Both are re-exported here so callers needn't
+import from `huggingface_hub`.
 """
 import os
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
+
+# What a Hub request raises when it can't be answered: an HTTP error (401, 404,
+# 5xx) or an offline mode is an OSError; a connection that fails below HTTP is an
+# httpx error in huggingface_hub 1.x.
+try:
+    from httpx import HTTPError as _TransportError
+except ImportError:  # huggingface_hub 0.x uses requests, whose errors are OSErrors.
+    _TransportError = OSError
+REQUEST_ERRORS: tuple[type[Exception], ...] = (OSError, _TransportError)
 
 DEFAULT_REPO_ID = "AudioInstruct/Universal-Audio-Understanding"
 _RESOLVE_MARKER = "/resolve/"
@@ -90,3 +107,61 @@ def download_prompts_dir(
         allow_patterns="prompts/*",
     )
     return os.path.join(local_repo, "prompts")
+
+
+def _paths_info(rels: list[str], *, repo_id: str, revision: str | None,
+                token: str | None) -> list:
+    """The Hub's file info for each of `rels` that's there, from one metadata request."""
+    return HfApi(token=token).get_paths_info(
+        repo_id, rels, revision=revision, repo_type="dataset")
+
+
+def file_versions(
+    paths_or_urls: list[str],
+    *,
+    repo_id: str = DEFAULT_REPO_ID,
+    revision: str | None = None,
+    token: str | None = None,
+) -> dict[str, str]:
+    """Return repo path -> version at `revision` for each path, in one metadata request.
+
+    An LFS file's version is its sha256; any other file's is its git blob id.
+    Either changes whenever the file's content does. Paths that aren't there are
+    left out.
+    """
+    infos = _paths_info([to_repo_path(p) for p in paths_or_urls],
+                        repo_id=repo_id, revision=revision, token=token)
+    return {info.path: info.lfs.sha256 if info.lfs is not None else info.blob_id
+            for info in infos}
+
+
+def file_sha256(
+    path_or_url: str,
+    *,
+    repo_id: str = DEFAULT_REPO_ID,
+    revision: str | None = None,
+    token: str | None = None,
+) -> str:
+    """Return one repo file's LFS sha256 at `revision`.
+
+    Raises `EntryNotFoundError` when the file isn't there, and ValueError when it
+    isn't stored with LFS (only LFS files have a sha256 on the Hub).
+    """
+    rel = to_repo_path(path_or_url)
+    infos = _paths_info([rel], repo_id=repo_id, revision=revision, token=token)
+    if not infos:
+        raise EntryNotFoundError(f"{rel} is not in {repo_id} at {revision or 'main'}.")
+    lfs = getattr(infos[0], "lfs", None)
+    if lfs is None:
+        raise ValueError(f"{rel} is not an LFS file, so the Hub records no sha256 for it.")
+    return lfs.sha256
+
+
+def current_commit(
+    *,
+    repo_id: str = DEFAULT_REPO_ID,
+    revision: str = "main",
+    token: str | None = None,
+) -> str:
+    """Return the commit sha that `revision` (a branch, by default `main`) points at now."""
+    return HfApi(token=token).dataset_info(repo_id, revision=revision).sha
