@@ -8,13 +8,15 @@ per-split metadata JSONs, prompt templates (`prompts/*.json`), named configs
 (`universal_audio_dataset_configs/*.json`), and smoke archives with their manifest
 (`smoke/`). It also reads a file's LFS sha256 and the current commit of a branch.
 
-A file that isn't on the Hub raises `EntryNotFoundError`, which is re-exported
-here so callers needn't import from `huggingface_hub`.
+A file that isn't on the Hub raises `EntryNotFoundError`. So does one that can't
+be fetched because the Hub is unreachable and it isn't cached: that raises the
+subclass `LocalEntryNotFoundError`. Both are re-exported here so callers needn't
+import from `huggingface_hub`.
 """
 import os
 
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
-from huggingface_hub.errors import EntryNotFoundError
+from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 
 DEFAULT_REPO_ID = "AudioInstruct/Universal-Audio-Understanding"
 _RESOLVE_MARKER = "/resolve/"
