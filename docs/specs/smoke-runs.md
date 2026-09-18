@@ -172,8 +172,8 @@ fetches through the existing `hub.download_file`.
     whatever the filter, so with a rejecting filter it could give fewer clips,
     or different ones, than the full archive. **(grill)**
 - **Staleness check:** on every run, the loader compares what the manifest
-  recorded with what's on the Hub now, using one small metadata request for
-  every internal dataset:
+  recorded with what's on the Hub now, using one small metadata request that
+  covers every internal dataset:
   - the full archive's sha256;
   - the version of the metadata JSON of each split the run config lists for the
     internal dataset. The build picked each split's clips from that file, so a

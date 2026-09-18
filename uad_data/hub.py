@@ -19,6 +19,15 @@ import os
 from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.errors import EntryNotFoundError, LocalEntryNotFoundError
 
+# What a Hub request raises when it can't be answered: an HTTP error (401, 404,
+# 5xx) or an offline mode is an OSError; a connection that fails below HTTP is an
+# httpx error in huggingface_hub 1.x.
+try:
+    from httpx import HTTPError as _TransportError
+except ImportError:  # huggingface_hub 0.x uses requests, whose errors are OSErrors.
+    _TransportError = OSError
+REQUEST_ERRORS: tuple[type[Exception], ...] = (OSError, _TransportError)
+
 DEFAULT_REPO_ID = "AudioInstruct/Universal-Audio-Understanding"
 _RESOLVE_MARKER = "/resolve/"
 

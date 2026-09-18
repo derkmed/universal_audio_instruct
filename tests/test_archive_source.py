@@ -299,6 +299,30 @@ def test_a_sha256_check_that_cannot_run_uses_the_smoke_archive_with_a_warning() 
     print("PASS: when the sha256 check can't run, the smoke archive is used with a warning.")
 
 
+def test_a_network_failure_in_the_check_uses_the_smoke_archive() -> None:
+    import httpx
+    for error in (httpx.ConnectError("no route to host"), OSError("401 Unauthorized")):
+        rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(), version_error=error,
+                                 split="all", clips_per_split=1)
+
+        assert fake.opens == ["smoke/Clotho.tar.gz"], (error, fake.opens)
+        assert any(str(error) in line for line in logs.lines(logging.WARNING)), logs.lines()
+
+    print("PASS: a network or HTTP failure in the staleness check uses the smoke archive.")
+
+
+def test_a_bug_in_the_staleness_check_is_not_taken_for_being_offline() -> None:
+    try:
+        _load(fx.CLOTHO, fx._clotho_config(), version_error=TypeError("a bug"),
+              split="all", clips_per_split=1)
+    except TypeError as e:
+        assert "a bug" in str(e), e
+    else:
+        raise AssertionError("a TypeError in the staleness check was swallowed")
+
+    print("PASS: a bug in the staleness check raises instead of passing for offline.")
+
+
 def test_a_full_archive_gone_from_the_hub_counts_as_stale() -> None:
     rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(), versions={"Clotho.tar.gz": None},
                              split="all", clips_per_split=1)

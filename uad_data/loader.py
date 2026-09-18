@@ -296,8 +296,9 @@ def _current_versions(
     """Repo path -> current Hub version of each full archive and listed metadata JSON.
 
     One metadata request covers every internal dataset. A file that's gone from
-    the Hub is left out. Returns None, with a warning, when the check can't run
-    (offline, say): the smoke archives are then used anyway.
+    the Hub is left out. Returns None, with a warning, when the request can't be
+    answered (offline, a network or HTTP error): the smoke archives are then used
+    anyway. Anything else, such as a bug, raises.
     """
     if not internal_datasets:
         return {}
@@ -306,7 +307,7 @@ def _current_versions(
         paths += [hub.to_repo_path(d.data_url), *_metadata_paths(d).values()]
     try:
         return hub.file_versions(paths, repo_id=repo_id, revision=revision, token=token)
-    except Exception as error:  # noqa: BLE001 -- any failure means the check can't run.
+    except hub.REQUEST_ERRORS as error:
         logger.warning(
             "Could not check whether the smoke archives of %s are stale, so using them "
             "anyway: %s", ", ".join(d.name for d in internal_datasets), describe_error(error))
