@@ -14,6 +14,8 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import dataclass
+from typing import Any, Iterable, NoReturn
 
 import numpy as np
 import soundfile as sf
@@ -21,7 +23,7 @@ import soundfile as sf
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from eval.backends.base import ModelBackend  # noqa: E402
+from eval.backends.base import InferenceRequest, ModelBackend  # noqa: E402
 from eval.config import EvalConfig  # noqa: E402
 from eval.evaluator import STATUSES, Evaluator  # noqa: E402
 from uad_data.load_report import (  # noqa: E402
@@ -66,11 +68,11 @@ class ScriptedBackend(ModelBackend):
     class BackendError(RuntimeError):
         pass
 
-    def __init__(self, predictions):
+    def __init__(self, predictions: Iterable[str | BaseException]) -> None:
         self.predictions = list(predictions)
         self.seen = 0
 
-    def generate_batch(self, requests):
+    def generate_batch(self, requests: list[InferenceRequest]) -> list[str]:
         out = []
         for _ in requests:
             nxt = self.predictions.pop(0)
@@ -88,7 +90,18 @@ ROWS = [
 ]
 
 
-def _run(rows, backend=None, **config) -> tuple[dict, list[dict], dict, object]:
+@dataclass
+class RunResult:
+    """What one `_run` left behind."""
+    summary: dict  # summary.json, as written
+    records: list[dict]  # results.jsonl, one record per line
+    returned: dict  # what `evaluate` returned
+    backend: ModelBackend  # the backend the run used
+
+
+def _run(
+    rows: list[dict], backend: ModelBackend | None = None, **config: Any,
+) -> RunResult:
     """Evaluate `rows` into a temp dir; give back summary, jsonl records, return value."""
     backend = EchoBackend() if backend is None else backend
     with tempfile.TemporaryDirectory() as output_dir:
@@ -99,7 +112,7 @@ def _run(rows, backend=None, **config) -> tuple[dict, list[dict], dict, object]:
             records = [json.loads(line) for line in f]
         with open(os.path.join(output_dir, "summary.json"), encoding="utf-8") as f:
             summary = json.load(f)
-    return summary, records, returned, backend
+    return RunResult(summary, records, returned, backend)
 
 
 def _group(summary: dict, dataset: str, split: str, task: str) -> dict:
@@ -116,7 +129,8 @@ def _group(summary: dict, dataset: str, split: str, task: str) -> dict:
 
 def test_every_loaded_row_is_evaluated() -> None:
     # clips_per_split caps clips in the loader; the evaluator must not cut rows again.
-    _, records, _, backend = _run(list(ROWS), clips_per_split=1)
+    run = _run(list(ROWS), clips_per_split=1)
+    records, backend = run.records, run.backend
 
     assert backend.seen == 3, backend.seen
     assert len(records) == 3, records
@@ -126,7 +140,7 @@ def test_every_loaded_row_is_evaluated() -> None:
 
 def test_each_record_keeps_its_own_row_split() -> None:
     """A smoke run asks for every split, so a run-level split would mislabel rows."""
-    _, records, _, _ = _run(list(ROWS), clips_per_split=1)
+    records = _run(list(ROWS), clips_per_split=1).records
 
     assert [r["split"] for r in records] == ["test", "train", "validation"], records
 
@@ -138,7 +152,7 @@ def test_each_record_keeps_its_own_row_split() -> None:
 # ----------------------------------------------------------------------
 
 def test_a_returned_prediction_is_ok() -> None:
-    _, records, _, _ = _run([ROWS[0]], clips_per_split=1)
+    records = _run([ROWS[0]], clips_per_split=1).records
 
     assert records[0]["status"] == "ok", records[0]
     assert records[0]["error"] is None, records[0]
@@ -148,7 +162,7 @@ def test_a_returned_prediction_is_ok() -> None:
 
 def test_a_whitespace_only_prediction_is_empty_output() -> None:
     backend = ScriptedBackend(["", "   \n\t "])
-    _, records, _, _ = _run(ROWS[:2], backend, clips_per_split=1)
+    records = _run(ROWS[:2], backend, clips_per_split=1).records
 
     assert [r["status"] for r in records] == ["empty_output", "empty_output"], records
 
@@ -159,7 +173,7 @@ def test_undecodable_audio_is_an_audio_error_and_skips_the_model() -> None:
     rows = [ROWS[0], _row("test/bad.wav", "test", "silence", audio=b"not audio at all")]
     backend = ScriptedBackend(["a cat meows"])
 
-    _, records, _, _ = _run(rows, backend, clips_per_split=1)
+    records = _run(rows, backend, clips_per_split=1).records
 
     assert backend.seen == 1, backend.seen  # the bad row never reached the model
     assert [r["status"] for r in records] == ["ok", "audio_error"], records
@@ -173,7 +187,7 @@ def test_a_raising_backend_fails_its_whole_batch_and_the_run_goes_on() -> None:
     # batch_size=2: the first batch raises, the second must still be evaluated.
     backend = ScriptedBackend([ScriptedBackend.BackendError("boom"), "rain falls"])
 
-    _, records, _, _ = _run(list(ROWS), backend, clips_per_split=1)
+    records = _run(list(ROWS), backend, clips_per_split=1).records
 
     assert [r["status"] for r in records] == ["model_error", "model_error", "ok"], records
     assert all("boom" in r["error"] for r in records[:2]), records
@@ -184,10 +198,10 @@ def test_a_raising_backend_fails_its_whole_batch_and_the_run_goes_on() -> None:
 def test_a_backend_that_returns_too_few_predictions_fails_its_batch() -> None:
     """A short return is the backend misbehaving, and a smoke run survives it."""
     class ShortBackend(ModelBackend):
-        def generate_batch(self, requests):
+        def generate_batch(self, requests: list[InferenceRequest]) -> list[str]:
             return ["only one"]  # two rows go in
 
-    _, records, _, _ = _run(ROWS[:2], ShortBackend(), clips_per_split=1)
+    records = _run(ROWS[:2], ShortBackend(), clips_per_split=1).records
 
     assert [r["status"] for r in records] == ["model_error", "model_error"], records
     assert all(r["error"] for r in records), records
@@ -199,7 +213,7 @@ def test_a_row_that_never_reached_the_model_keeps_its_prompt_in_the_record() -> 
     """Triaging a decode failure needs the row's own text, not just its path."""
     rows = [_row("test/bad.wav", "test", "silence", audio=b"not audio at all")]
 
-    _, records, _, _ = _run(rows, clips_per_split=1)
+    records = _run(rows, clips_per_split=1).records
 
     record = records[0]
     assert record["status"] == "audio_error", record
@@ -219,13 +233,14 @@ def test_a_metric_that_raises_does_not_take_the_run_down() -> None:
     """
     from eval import metrics as metrics_module
 
-    def _boom(*args, **kwargs):
+    def _boom(*args: Any, **kwargs: Any) -> NoReturn:
         raise RuntimeError("metric unavailable")
 
     original = metrics_module.metric_value, metrics_module.aggregate
     metrics_module.metric_value, metrics_module.aggregate = _boom, _boom
     try:
-        summary, records, _, _ = _run(list(ROWS), clips_per_split=1)
+        run = _run(list(ROWS), clips_per_split=1)
+        summary, records = run.summary, run.records
     finally:
         metrics_module.metric_value, metrics_module.aggregate = original
 
@@ -241,7 +256,7 @@ def test_a_row_with_no_audio_at_all_is_an_audio_error() -> None:
     """Not just undecodable bytes: a row missing the field entirely."""
     rows = [ROWS[0], {**_row("test/x.wav", "test", "silence"), "audio": None}]
 
-    _, records, _, _ = _run(rows, ScriptedBackend(["a cat meows"]), clips_per_split=1)
+    records = _run(rows, ScriptedBackend(["a cat meows"]), clips_per_split=1).records
 
     assert [r["status"] for r in records] == ["ok", "audio_error"], records
 
@@ -256,15 +271,16 @@ def test_a_backend_returning_anything_but_strings_fails_its_batch() -> None:
     escaping the loop and costing the run its summary.
     """
     class NoneBackend(ModelBackend):
-        def generate_batch(self, requests):
+        def generate_batch(self, requests: list[InferenceRequest]) -> list[Any]:
             return [None] * len(requests)
 
     class NumberBackend(ModelBackend):
-        def generate_batch(self, requests):
+        def generate_batch(self, requests: list[InferenceRequest]) -> list[Any]:
             return [1.0] * len(requests)
 
     for backend in (NoneBackend(), NumberBackend()):
-        summary, records, _, _ = _run(ROWS[:2], backend, clips_per_split=1)
+        run = _run(ROWS[:2], backend, clips_per_split=1)
+        summary, records = run.summary, run.records
         assert [r["status"] for r in records] == ["model_error", "model_error"], records
         assert all(r["error"] for r in records), records
         assert summary["groups"], summary  # the run still produced its summary
@@ -279,7 +295,7 @@ def test_an_unavailable_metric_is_complained_about_once_per_run() -> None:
 
     from eval import metrics as metrics_module
 
-    def _boom(*args, **kwargs):
+    def _boom(*args: Any, **kwargs: Any) -> NoReturn:
         raise RuntimeError("metric unavailable")
 
     original = metrics_module.metric_value, metrics_module.aggregate
@@ -311,7 +327,7 @@ def test_a_render_failure_keeps_the_utterance_it_failed_on() -> None:
         ],
     ))
 
-    _, records, _, _ = _run(rows, clips_per_split=1)
+    records = _run(rows, clips_per_split=1).records
 
     assert [r["utterance_index"] for r in records] == [0, 3], records
 
@@ -326,7 +342,8 @@ def test_a_row_that_failed_to_render_is_reported_from_the_load_report() -> None:
             "Clotho", "test", "caption", "test/t9.wav", "KeyError: 'caption'")],
     ))
 
-    summary, records, _, _ = _run(rows, clips_per_split=1)
+    run = _run(rows, clips_per_split=1)
+    summary, records = run.summary, run.records
 
     unrendered = [r for r in records if r["status"] == "render_error"]
     assert len(unrendered) == 1, records
@@ -344,11 +361,11 @@ def test_a_row_that_failed_to_render_is_reported_from_the_load_report() -> None:
 # ----------------------------------------------------------------------
 
 def test_a_group_passes_only_when_every_row_is_ok() -> None:
-    summary, _, _, _ = _run([ROWS[0]], clips_per_split=1)
+    summary = _run([ROWS[0]], clips_per_split=1).summary
     assert _group(summary, "Clotho", "test", "caption")["passed"] is True, summary
     assert summary["passed"] is True, summary
 
-    summary, _, _, _ = _run([ROWS[0]], ScriptedBackend([""]), clips_per_split=1)
+    summary = _run([ROWS[0]], ScriptedBackend([""]), clips_per_split=1).summary
     assert _group(summary, "Clotho", "test", "caption")["passed"] is False, summary
     assert summary["passed"] is False, summary
 
@@ -362,7 +379,8 @@ def test_a_group_with_no_rows_fails() -> None:
         splits=[SplitReport("Clotho", "test", ["caption", "asr"], clips_found=0)],
     ))
 
-    summary, records, _, _ = _run(rows, clips_per_split=5)
+    run = _run(rows, clips_per_split=5)
+    summary, records = run.summary, run.records
 
     assert records == [], records
     for task in ("caption", "asr"):
@@ -382,7 +400,7 @@ def test_internal_datasets_that_failed_to_load_are_listed_and_fail_the_run() -> 
         load_failures=[LoadFailure("MELD", "unexpected end of data", rows_kept=0)],
     ))
 
-    summary, _, _, _ = _run(rows, clips_per_split=1)
+    summary = _run(rows, clips_per_split=1).summary
 
     assert summary["load_failures"] == [
         {"dataset": "MELD", "error": "unexpected end of data", "rows_kept": 0}], summary
@@ -399,7 +417,7 @@ def test_internal_datasets_that_failed_to_load_are_listed_and_fail_the_run() -> 
 def test_results_jsonl_keeps_todays_fields_and_adds_the_new_ones() -> None:
     # The prediction matches the plain caption, not the rendered output, so a
     # metric of 0.0 is itself evidence of which field the row is read against.
-    _, records, _, _ = _run([ROWS[0]], ScriptedBackend(["a cat meows"]), clips_per_split=1)
+    records = _run([ROWS[0]], ScriptedBackend(["a cat meows"]), clips_per_split=1).records
 
     record = records[0]
     for field in ("index", "model_choice", "model", "dataset", "sys_inst", "prompt",
@@ -422,7 +440,7 @@ def test_summary_json_has_one_entry_per_group_with_the_decided_fields() -> None:
         clips_per_split=1,
         splits=[SplitReport("Clotho", "test", ["caption"], clips_found=1)]))
 
-    summary, _, _, _ = _run(rows, ScriptedBackend(["a cat meows"]), clips_per_split=1)
+    summary = _run(rows, ScriptedBackend(["a cat meows"]), clips_per_split=1).summary
 
     assert summary["model_choice"] == "GEMMA-4", summary
     assert summary["clips_per_split"] == 1, summary
@@ -443,7 +461,7 @@ def test_a_groups_metric_covers_its_rows_with_a_prediction() -> None:
     rows = [_row("test/a.wav", "test", "one two"), _row("test/b.wav", "test", "three four")]
     backend = ScriptedBackend(["one two", ""])
 
-    summary, _, _, _ = _run(rows, backend, clips_per_split=1)
+    summary = _run(rows, backend, clips_per_split=1).summary
 
     # Corpus WER over both rows: two of four reference words wrong.
     assert _group(summary, "Clotho", "test", "caption")["metric_value"] == 0.5, summary
@@ -452,10 +470,11 @@ def test_a_groups_metric_covers_its_rows_with_a_prediction() -> None:
 
 
 def test_evaluate_returns_the_summary_plus_the_row_records() -> None:
-    _, records, returned, _ = _run(list(ROWS), clips_per_split=1)
+    run = _run(list(ROWS), clips_per_split=1)
+    records, returned = run.records, run.returned
 
     assert returned["rows"] == records, (returned["rows"], records)
-    assert returned["groups"] == _run(list(ROWS), clips_per_split=1)[0]["groups"]
+    assert returned["groups"] == _run(list(ROWS), clips_per_split=1).summary["groups"]
     assert "wer" not in returned and "num_samples" not in returned, returned
     assert "predictions" not in returned and "references" not in returned, returned
 

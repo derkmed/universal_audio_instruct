@@ -11,6 +11,8 @@ Runnable directly (`python tests/test_metrics.py`) or under pytest. Needs the
 """
 import os
 import sys
+from contextlib import contextmanager
+from typing import Any, Iterator, NoReturn, Optional
 
 # Make the package importable when run directly from the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -18,8 +20,45 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from eval import metrics  # noqa: E402
 
 
-def _row(task: str, **answer) -> dict:
+def _row(task: str, **answer: Any) -> dict:
     return {"task": task, **answer}
+
+
+@contextmanager
+def _wer_load_failing(attempts: list[str]) -> Iterator[None]:
+    """Make every `wer` load fail, logging each attempt, from a clean slate.
+
+    Nothing is loaded or remembered on entry, and all three module names are
+    restored on exit.
+    """
+    def _failing_load(name: str) -> NoReturn:
+        attempts.append(name)
+        raise OSError("no route to host")
+
+    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
+    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
+        _failing_load, None, None)
+    try:
+        yield
+    finally:
+        (metrics.hf_evaluate.load, metrics._wer_metric,
+         metrics._wer_load_error) = original
+
+
+def _error_of_metric_value(row: dict, prediction: str) -> Optional[Exception]:
+    """What `metric_value` raised for this row, or None if it returned."""
+    try:
+        metrics.metric_value(row, prediction)
+    except Exception as error:
+        return error
+    return None
+
+
+def _traceback_depth(error: BaseException) -> int:
+    depth, frame = 0, error.__traceback__
+    while frame is not None:
+        depth, frame = depth + 1, frame.tb_next
+    return depth
 
 
 # ----------------------------------------------------------------------
@@ -354,33 +393,16 @@ def test_numbers_are_compared_as_numbers_not_as_digit_runs() -> None:
 
 def test_a_failed_metric_load_can_be_retried_in_a_later_run() -> None:
     """One notebook kernel runs many evaluations; a Hub blip must not end them all."""
-    attempts = []
-
-    def _failing_load(name):
-        attempts.append(name)
-        raise OSError("no route to host")
-
-    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
-    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
-        _failing_load, None, None)
-    try:
+    attempts: list[str] = []
+    with _wer_load_failing(attempts):
         row = _row("asr", transcription="a dog barks")
         for _ in range(3):
-            try:
-                metrics.metric_value(row, "a dog barks")
-            except Exception:
-                pass
+            _error_of_metric_value(row, "a dog barks")
         assert len(attempts) == 1, attempts
 
         metrics.forget_failed_load()
-        try:
-            metrics.metric_value(row, "a dog barks")
-        except Exception:
-            pass
+        _error_of_metric_value(row, "a dog barks")
         assert len(attempts) == 2, attempts
-    finally:
-        (metrics.hf_evaluate.load, metrics._wer_metric,
-         metrics._wer_load_error) = original
 
     print("PASS: a failed metric load can be retried in a later run.")
 
@@ -393,32 +415,14 @@ def test_a_remembered_load_failure_does_not_hoard_the_rows_it_refused() -> None:
     a capped run over 30-second clips that is hundreds of megabytes, in exactly
     the offline kernel the tolerance exists to keep alive.
     """
-    def _failing_load(name):
-        raise OSError("no route to host")
-
-    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
-    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
-        _failing_load, None, None)
-    try:
+    with _wer_load_failing([]):
         row = _row("asr", transcription="a dog barks")
-        raised = []
-        for _ in range(6):
-            try:
-                metrics.metric_value(row, "a dog barks")
-            except Exception as error:
-                raised.append(error)
-    finally:
-        (metrics.hf_evaluate.load, metrics._wer_metric,
-         metrics._wer_load_error) = original
+        outcomes = [_error_of_metric_value(row, "a dog barks") for _ in range(6)]
+    raised = [error for error in outcomes if error is not None]
 
     # A fresh exception every time, so no traceback accumulates across the run.
     assert len({id(error) for error in raised}) == len(raised), raised
-    depths = []
-    for error in raised[1:]:
-        depth, frame = 0, error.__traceback__
-        while frame is not None:
-            depth, frame = depth + 1, frame.tb_next
-        depths.append(depth)
+    depths = [_traceback_depth(error) for error in raised[1:]]
     assert max(depths) == min(depths), depths
 
     print("PASS: a remembered load failure does not hoard the rows it refused.")
@@ -430,25 +434,11 @@ def test_a_metric_that_will_not_load_is_only_attempted_once() -> None:
     Without remembering the failure, a 1000-row asr run makes 1000 load attempts,
     each with its own retry budget, and prints 1000 identical complaints.
     """
-    attempts = []
-
-    def _failing_load(name):
-        attempts.append(name)
-        raise OSError("no route to host")
-
-    original = (metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error)
-    metrics.hf_evaluate.load, metrics._wer_metric, metrics._wer_load_error = (
-        _failing_load, None, None)
-    try:
+    attempts: list[str] = []
+    with _wer_load_failing(attempts):
         row = _row("asr", transcription="a dog barks")
         for _ in range(5):
-            try:
-                metrics.metric_value(row, "a dog barks")
-            except Exception:
-                pass
-    finally:
-        (metrics.hf_evaluate.load, metrics._wer_metric,
-         metrics._wer_load_error) = original
+            _error_of_metric_value(row, "a dog barks")
 
     assert len(attempts) == 1, attempts
 
