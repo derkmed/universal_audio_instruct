@@ -4,12 +4,17 @@ This replaces the loading script's `dl_manager` downloads and the
 `_ensure_hub_resources()` shim. Everything here uses `huggingface_hub` to pull
 plain files -- there is no `trust_remote_code` and no executable dataset script
 on the Hub. Assets fetched: per-dataset audio archives (`data/<name>/<name>.tar.gz`),
-per-split metadata JSONs, prompt templates (`prompts/*.json`), and named configs
-(`universal_audio_dataset_configs/*.json`).
+per-split metadata JSONs, prompt templates (`prompts/*.json`), named configs
+(`universal_audio_dataset_configs/*.json`), and smoke archives with their manifest
+(`smoke/`). It also reads a file's LFS sha256 and the current commit of a branch.
+
+A file that isn't on the Hub raises `EntryNotFoundError`, which is re-exported
+here so callers needn't import from `huggingface_hub`.
 """
 import os
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+from huggingface_hub.errors import EntryNotFoundError
 
 DEFAULT_REPO_ID = "AudioInstruct/Universal-Audio-Understanding"
 _RESOLVE_MARKER = "/resolve/"
@@ -90,3 +95,36 @@ def download_prompts_dir(
         allow_patterns="prompts/*",
     )
     return os.path.join(local_repo, "prompts")
+
+
+def file_sha256(
+    path_or_url: str,
+    *,
+    repo_id: str = DEFAULT_REPO_ID,
+    revision: str | None = None,
+    token: str | None = None,
+) -> str:
+    """Return a repo file's LFS sha256 at `revision`, with one small metadata request.
+
+    Raises `EntryNotFoundError` when the file isn't there, and ValueError when it
+    isn't stored with LFS (only LFS files have a sha256 on the Hub).
+    """
+    rel = to_repo_path(path_or_url)
+    infos = HfApi(token=token).get_paths_info(
+        repo_id, [rel], revision=revision, repo_type="dataset")
+    if not infos:
+        raise EntryNotFoundError(f"{rel} is not in {repo_id} at {revision or 'main'}.")
+    lfs = getattr(infos[0], "lfs", None)
+    if lfs is None:
+        raise ValueError(f"{rel} is not an LFS file, so the Hub records no sha256 for it.")
+    return lfs.sha256
+
+
+def current_commit(
+    *,
+    repo_id: str = DEFAULT_REPO_ID,
+    revision: str = "main",
+    token: str | None = None,
+) -> str:
+    """Return the commit sha that `revision` (a branch, by default `main`) points at now."""
+    return HfApi(token=token).dataset_info(repo_id, revision=revision).sha

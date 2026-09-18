@@ -81,6 +81,8 @@ def _build_fixture(root: str, metadata: list[dict] = METADATA, config: dict = CO
 def _fake_hub(fx: dict) -> dict:
     """Fake hub.* functions that serve local fixture files instead of the network."""
     def fake_download_file(path_or_url, *, repo_id=None, revision=None, token=None):
+        if hub.to_repo_path(path_or_url).startswith("smoke/"):
+            raise hub.EntryNotFoundError(f"{path_or_url} is not on the Hub")
         base = os.path.basename(hub.to_repo_path(path_or_url))
         if base.endswith(".tar.gz"):
             return fx["tar_path"]
