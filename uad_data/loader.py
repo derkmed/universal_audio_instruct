@@ -242,19 +242,26 @@ def _archive_sources(
 
 def _smoke_manifest(*, repo_id: str, revision: str | None, token: str | None,
                     ) -> dict[str, smoke.SmokeEntry]:
-    """The Hub's smoke manifest, or no entries when it can't be fetched."""
+    """The Hub's smoke manifest, or no entries when there is none or it can't be used.
+
+    No manifest on the Hub is logged; one that can't be fetched (the Hub is
+    unreachable and it isn't cached, say) or can't be read gets a warning.
+    """
     try:
         path = hub.download_file(
             smoke.MANIFEST_PATH, repo_id=repo_id, revision=revision, token=token)
+        return smoke.read_manifest(path)
+    except hub.LocalEntryNotFoundError as error:
+        problem = error
     except hub.EntryNotFoundError as error:
         logger.info("No smoke manifest (%s); smoke runs read full archives.", error)
         return {}
-    except OSError as error:
-        logger.warning(
-            "Could not fetch the smoke manifest, so smoke runs read full archives: %s",
-            describe_error(error))
-        return {}
-    return smoke.read_manifest(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problem = error
+    logger.warning(
+        "Could not use the smoke manifest, so smoke runs read full archives: %s",
+        describe_error(problem))
+    return {}
 
 
 def _smoke_or_stream(

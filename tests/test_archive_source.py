@@ -12,6 +12,7 @@ Runnable directly (`python tests/test_archive_source.py`) or under pytest. Only
 requires `datasets`, `jinja2`, `huggingface_hub`.
 """
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -22,6 +23,8 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import test_loader_splits as fx  # noqa: E402
+
+from huggingface_hub.errors import LocalEntryNotFoundError  # noqa: E402
 
 from uad_data import build_smoke_archives, smoke  # noqa: E402
 
@@ -96,10 +99,15 @@ class _Logs(logging.Handler):
 
 def _load(datasets: dict, config: dict, *, built_n: int = 3, skip: tuple = (),
           manifest: bool = True, truncate: dict | None = None, sha256: dict | None = None,
-          sha256_error: Exception | None = None, **kwargs: object) -> "Loaded":
+          sha256_error: Exception | None = None, prompts: tuple[dict, ...] = (),
+          **kwargs: object) -> "Loaded":
     """Load with smoke archives on the fake Hub; return the rows, the fake and the log lines."""
     with fx.tempfile.TemporaryDirectory() as root:
         fixture = fx._build_fixture(root, datasets, config)
+        for prompt in prompts:
+            path = os.path.join(fixture["prompts_dir"], f"{prompt['task']}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(prompt, f)
         for base, fraction in (truncate or {}).items():
             with open(fixture["files"][base], "r+b") as f:
                 f.truncate(int(os.path.getsize(fixture["files"][base]) * fraction))
@@ -154,6 +162,47 @@ def _streamed_full(fake: fx._FakeHub, logs: _Logs, dataset: str,
     assert f"{dataset}.tar.gz" in fake.reads, "the full archive was not streamed"
     assert any(dataset in line and "full archive" in line for line in logs.lines(level)), \
         logs.lines()
+
+
+TIMESTAMP_PROMPT = {
+    "task": "asr_timestamp_search",
+    "prompts": ["What is said between {{start_time}} and {{end_time}}?"],
+    "outputs": ["{{transcription}}"],
+}
+# The first clip of each dataset is an edge case: an EMNS clip with no category,
+# so its classification row fails to render, and a libricss clip with no
+# utterances. A full-archive run counts both toward the cap.
+EDGE_EMNS = [f"emns/{i}.wav" for i in range(3)]
+EDGE_LIBRICSS = [f"segments/segment_{i}.wav" for i in range(3)]
+EDGE_CASES = {
+    "EMNS": {"members": EDGE_EMNS, "splits": {"train": [
+        {k: v for k, v in fx._emns_record(p).items() if not (p == EDGE_EMNS[0] and k == "category")}
+        for p in EDGE_EMNS]}},
+    "libricss": {"members": EDGE_LIBRICSS, "splits": {"test": [
+        {"audio_path": p, "transcriptions": [] if p == EDGE_LIBRICSS[0] else [
+            {"start_time": 0.0, "end_time": 1.0, "transcription": f"words of {p}"}]}
+        for p in EDGE_LIBRICSS]}},
+}
+EDGE_CASES_CONFIG = {"name": "edges", "datasets": [
+    {"name": "EMNS", "tasks": ["classification"], "splits": ["train"]},
+    {"name": "libricss", "tasks": ["asr_timestamp_search"], "splits": ["test"]},
+]}
+
+
+def test_a_smoke_archive_gives_the_full_archives_clips_for_unrenderable_clips() -> None:
+    """With n == N, clips that fail to render or have no utterances still count."""
+    loads = [_load(EDGE_CASES, EDGE_CASES_CONFIG, built_n=2, prompts=(TIMESTAMP_PROMPT,),
+                   split="all", clips_per_split=2, stream=stream)
+             for stream in (None, True)]
+    (smoke_rows, smoke_fake, _), (full_rows, _, _) = loads
+
+    assert smoke_fake.opens == ["smoke/EMNS.tar.gz", "smoke/libricss.tar.gz"], smoke_fake.opens
+    assert list(smoke_rows) == list(full_rows), "smoke rows differ from full-archive rows"
+    assert smoke_rows.report == full_rows.report, (smoke_rows.report, full_rows.report)
+    assert [s.clips_found for s in smoke_rows.report.splits] == [2, 2], smoke_rows.report
+    assert len(smoke_rows.report.render_failures) == 2, smoke_rows.report.render_failures
+
+    print("PASS: clips that fail to render count the same in smoke and full-archive runs.")
 
 
 def test_a_cap_above_the_smoke_archives_n_streams_the_full_archive() -> None:
@@ -220,7 +269,8 @@ def test_a_full_archive_gone_from_the_hub_counts_as_stale() -> None:
     print("PASS: a full archive missing from the Hub makes its smoke archive stale.")
 
 
-def test_a_manifest_that_cannot_be_fetched_warns() -> None:
+def _load_with_manifest_download(failure: Callable[[str], str]) -> Loaded:
+    """Load where fetching `smoke/manifest.json` calls `failure(path)` instead."""
     with fx.tempfile.TemporaryDirectory() as root:
         fixture = fx._build_fixture(root, fx.CLOTHO, fx._clotho_config())
         fake = fx._FakeHub(fixture)
@@ -228,18 +278,52 @@ def test_a_manifest_that_cannot_be_fetched_warns() -> None:
 
         def download_file(path_or_url: str, **kwargs: object) -> str:
             if path_or_url == "smoke/manifest.json":
-                raise OSError("connection reset")
+                return failure(os.path.join(root, "manifest.json"))
             return serve(path_or_url, **kwargs)
 
         fake.download_file = download_file
         with fx._patched_hub(fake), _Logs() as logs:
-            fx.loader.load_uad_dataset(json_config_path=fixture["config_path"], token=None,
-                                       split="all", clips_per_split=1)
+            rows = fx.loader.load_uad_dataset(json_config_path=fixture["config_path"],
+                                              token=None, split="all", clips_per_split=1)
+    return Loaded(rows, fake, logs)
 
-    assert any("connection reset" in line for line in logs.lines(logging.WARNING)), logs.lines()
-    assert fake.opens == ["Clotho.tar.gz"], fake.opens
+
+def _raise(error: Exception) -> Callable[[str], str]:
+    def failure(path: str) -> str:
+        raise error
+    return failure
+
+
+def _serve(content: str) -> Callable[[str], str]:
+    def failure(path: str) -> str:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+    return failure
+
+
+def test_a_manifest_that_cannot_be_fetched_warns() -> None:
+    offline = LocalEntryNotFoundError("cannot reach the Hub and manifest.json is not cached")
+    for error in (OSError("connection reset"), offline):
+        rows, fake, logs = _load_with_manifest_download(_raise(error))
+
+        assert any(str(error) in line for line in logs.lines(logging.WARNING)), logs.lines()
+        assert fake.opens == ["Clotho.tar.gz"], fake.opens
 
     print("PASS: a manifest that can't be fetched logs a warning and streams full archives.")
+
+
+def test_a_malformed_manifest_warns_and_streams_full_archives() -> None:
+    entry = {"clips_per_split": 3, "clips": {"test": 3}, "source_sha256": "0" * 64,
+             "revision": "abc123"}
+    for content in ("{\"datasets\": {", json.dumps({"archives": {}}),
+                    json.dumps({"datasets": {"Clotho": {**entry, "added_later": 1}}})):
+        rows, fake, logs = _load_with_manifest_download(_serve(content))
+
+        assert any("manifest" in line for line in logs.lines(logging.WARNING)), logs.lines()
+        assert fake.opens == ["Clotho.tar.gz"], (content, fake.opens)
+
+    print("PASS: a malformed manifest logs a warning and streams full archives.")
 
 
 def test_a_row_filter_other_than_all_pass_streams_the_full_archive() -> None:
