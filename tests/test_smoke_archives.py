@@ -16,6 +16,7 @@ import os
 import sys
 import tarfile
 import tempfile
+from typing import Callable, TypeVar
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -25,6 +26,8 @@ import test_loader_splits as fx  # noqa: E402
 from huggingface_hub.hf_api import RepoFile  # noqa: E402
 
 from uad_data import build_smoke_archives, hub, internal_datasets, smoke  # noqa: E402
+
+T = TypeVar("T")
 
 # Clotho-like: every split registered, test/ stored first, four clips each.
 MEMBERS = (
@@ -52,7 +55,8 @@ def _archive(members: list[str]) -> bytes:
     return buffer.getvalue()
 
 
-def _build(source: bytes, split_paths: dict, clips_per_split: int):
+def _build(source: bytes, split_paths: dict, clips_per_split: int,
+           ) -> tuple[build_smoke_archives.SmokeBuild, list[tuple[tarfile.TarInfo, bytes]]]:
     """Run the builder over `source`; return its result and the smoke archive's members."""
     destination = io.BytesIO()
     result = build_smoke_archives.write_smoke_archive(
@@ -167,16 +171,17 @@ class _FakeApi:
     """Stands in for HfApi: answers get_paths_info from `files` and records calls."""
     calls: list[dict] = []
 
-    def __init__(self, files: dict, token=None):
+    def __init__(self, files: dict, token: str | None = None) -> None:
         self.files = files
 
-    def get_paths_info(self, repo_id, paths, *, revision=None, repo_type=None, **kwargs):
+    def get_paths_info(self, repo_id: str, paths: list[str], *, revision: str | None = None,
+                       repo_type: str | None = None, **kwargs: object) -> list[RepoFile]:
         _FakeApi.calls.append({"repo_id": repo_id, "paths": paths,
                                "revision": revision, "repo_type": repo_type})
         return [self.files[p] for p in paths if p in self.files]
 
 
-def _with_fake_api(files: dict, call):
+def _with_fake_api(files: dict, call: Callable[[], T]) -> T:
     original = hub.HfApi
     hub.HfApi = lambda token=None: _FakeApi(files, token)
     _FakeApi.calls = []
@@ -219,10 +224,11 @@ def test_file_sha256_raises_for_a_missing_or_non_lfs_file() -> None:
 class _ShaHub:
     """Answers file_sha256 from a map of repo path to sha256."""
 
-    def __init__(self, sha256: dict):
+    def __init__(self, sha256: dict) -> None:
         self.sha256 = sha256
 
-    def file_sha256(self, path_or_url, *, repo_id=None, revision=None, token=None):
+    def file_sha256(self, path_or_url: str, *, repo_id: str | None = None,
+                    revision: str | None = None, token: str | None = None) -> str:
         return self.sha256[hub.to_repo_path(path_or_url)]
 
 

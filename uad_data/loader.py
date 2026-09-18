@@ -181,7 +181,9 @@ class RecordedLoadError(OSError):
 
 
 @contextlib.contextmanager
-def _open_archive(source: ArchiveSource, *, repo_id: str, revision, token):
+def _open_archive(
+    source: ArchiveSource, *, repo_id: str, revision: str | None, token: str | None,
+) -> Iterator[tarfile.TarFile]:
     """Yield a streaming tar handle for an internal dataset's audio archive.
 
     Without `source.stream` the whole `.tar.gz` is downloaded (and cached) first;
@@ -244,8 +246,13 @@ def _smoke_manifest(*, repo_id: str, revision: str | None, token: str | None,
     try:
         path = hub.download_file(
             smoke.MANIFEST_PATH, repo_id=repo_id, revision=revision, token=token)
-    except (hub.EntryNotFoundError, OSError) as error:
+    except hub.EntryNotFoundError as error:
         logger.info("No smoke manifest (%s); smoke runs read full archives.", error)
+        return {}
+    except OSError as error:
+        logger.warning(
+            "Could not fetch the smoke manifest, so smoke runs read full archives: %s",
+            describe_error(error))
         return {}
     return smoke.read_manifest(path)
 
@@ -289,11 +296,14 @@ def _smoke_is_stale(
 ) -> bool:
     """Whether the full archive's sha256 on the Hub differs from the one the smoke build used.
 
-    When the check can't run (offline, say), logs a warning and says not stale.
+    A full archive that's gone from the Hub counts as changed. When the check
+    can't run (offline, say), logs a warning and says not stale.
     """
     try:
         current = hub.file_sha256(
             internal_dataset.data_url, repo_id=repo_id, revision=revision, token=token)
+    except hub.EntryNotFoundError:
+        return True
     except Exception as error:  # noqa: BLE001 -- any failure means the check can't run.
         logger.warning(
             "Could not check whether the smoke archive of %s is stale, so using it "
