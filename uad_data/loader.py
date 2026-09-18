@@ -232,12 +232,15 @@ def _archive_sources(
                 "whatever the row filter, so they only serve the all_pass filter.", d.name)
         return {d.name: ArchiveSource(d.data_url, stream=True) for d in internal_datasets}
     manifest = _smoke_manifest(repo_id=repo_id, revision=revision, token=token)
-    return {
-        d.name: _smoke_or_stream(
-            d, manifest.get(d.name), clips_per_split,
-            repo_id=repo_id, revision=revision, token=token)
-        for d in internal_datasets
+    fitting = {
+        d.name: manifest[d.name] for d in internal_datasets
+        if _smoke_fits(d.name, manifest.get(d.name), clips_per_split)
     }
+    current = _current_sha256s(
+        [d for d in internal_datasets if d.name in fitting],
+        repo_id=repo_id, revision=revision, token=token)
+    return {d.name: _smoke_or_stream(d, fitting.get(d.name), current)
+            for d in internal_datasets}
 
 
 def _smoke_manifest(*, repo_id: str, revision: str | None, token: str | None,
@@ -264,59 +267,66 @@ def _smoke_manifest(*, repo_id: str, revision: str | None, token: str | None,
     return {}
 
 
-def _smoke_or_stream(
-    internal_dataset: InternalDataset,
-    entry: smoke.SmokeEntry | None,
-    clips_per_split: int,
-    *,
-    repo_id: str,
-    revision: str | None,
-    token: str | None,
-) -> ArchiveSource:
-    """An internal dataset's smoke archive when it's usable, else its streamed full archive."""
-    name = internal_dataset.name
-    full = ArchiveSource(internal_dataset.data_url, stream=True)
+def _smoke_fits(name: str, entry: smoke.SmokeEntry | None, clips_per_split: int) -> bool:
+    """Whether an internal dataset has a smoke archive holding enough clips, logging why not."""
     if entry is None:
         logger.info("Streaming the full archive of %s: it has no smoke archive.", name)
-        return full
+        return False
     if clips_per_split > entry.clips_per_split:
         logger.info(
             "Streaming the full archive of %s: its smoke archive holds %d clips per "
             "split, fewer than the %d asked for.", name, entry.clips_per_split, clips_per_split)
-        return full
-    if _smoke_is_stale(internal_dataset, entry, repo_id=repo_id, revision=revision, token=token):
-        logger.warning(
-            "Streaming the full archive of %s: its smoke archive is stale, built "
-            "from a full archive that has since changed.", name)
-        return full
-    return ArchiveSource(
-        smoke.smoke_archive_path(name), stream=False, recorded_error=entry.error)
+        return False
+    return True
 
 
-def _smoke_is_stale(
-    internal_dataset: InternalDataset,
-    entry: smoke.SmokeEntry,
+def _current_sha256s(
+    internal_datasets: list[InternalDataset],
     *,
     repo_id: str,
     revision: str | None,
     token: str | None,
-) -> bool:
-    """Whether the full archive's sha256 on the Hub differs from the one the smoke build used.
+) -> dict[str, str] | None:
+    """Repo path -> current LFS sha256 of these full archives, from one metadata request.
 
-    A full archive that's gone from the Hub counts as changed. When the check
-    can't run (offline, say), logs a warning and says not stale.
+    An archive that's gone from the Hub is left out. Returns None, with a
+    warning, when the check can't run (offline, say): the smoke archives are
+    then used anyway.
     """
+    if not internal_datasets:
+        return {}
     try:
-        current = hub.file_sha256(
-            internal_dataset.data_url, repo_id=repo_id, revision=revision, token=token)
-    except hub.EntryNotFoundError:
-        return True
+        return hub.file_sha256s(
+            [d.data_url for d in internal_datasets],
+            repo_id=repo_id, revision=revision, token=token)
     except Exception as error:  # noqa: BLE001 -- any failure means the check can't run.
         logger.warning(
-            "Could not check whether the smoke archive of %s is stale, so using it "
-            "anyway: %s", internal_dataset.name, describe_error(error))
-        return False
-    return current != entry.source_sha256
+            "Could not check whether the smoke archives of %s are stale, so using them "
+            "anyway: %s", ", ".join(d.name for d in internal_datasets), describe_error(error))
+        return None
+
+
+def _smoke_or_stream(
+    internal_dataset: InternalDataset,
+    entry: smoke.SmokeEntry | None,
+    current: dict[str, str] | None,
+) -> ArchiveSource:
+    """An internal dataset's smoke archive when it fits and is fresh, else its streamed full archive.
+
+    `current` holds the full archives' current sha256s; None means the check
+    couldn't run, so a fitting smoke archive counts as fresh.
+    """
+    name = internal_dataset.name
+    if entry is None:
+        return ArchiveSource(internal_dataset.data_url, stream=True)
+    archive_path = hub.to_repo_path(internal_dataset.data_url)
+    if current is not None and current.get(archive_path) != entry.source_sha256:
+        logger.warning(
+            "Streaming the full archive of %s: its smoke archive is stale, built "
+            "from a full archive that has since changed or gone.", name)
+        return ArchiveSource(internal_dataset.data_url, stream=True)
+    return ArchiveSource(
+        smoke.smoke_archive_path(name), stream=False, recorded_error=entry.error)
 
 
 def _iter_rows(

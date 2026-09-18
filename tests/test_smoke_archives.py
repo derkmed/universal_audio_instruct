@@ -221,6 +221,18 @@ def test_file_sha256_raises_for_a_missing_or_non_lfs_file() -> None:
     print("PASS: file_sha256 raises for a missing file and for a non-LFS file.")
 
 
+def test_file_sha256s_reads_several_paths_in_one_request() -> None:
+    a, b = "data/Clotho/Clotho.tar.gz", "data/EMNS/EMNS.tar.gz"
+    files = {a: _repo_file(a, "ab" * 32), b: _repo_file(b, "cd" * 32)}
+
+    shas = _with_fake_api(files, lambda: hub.file_sha256s([a, b, "smoke/gone.tar.gz"]))
+
+    assert shas == {a: "ab" * 32, b: "cd" * 32}, shas
+    assert len(_FakeApi.calls) == 1, _FakeApi.calls
+
+    print("PASS: file_sha256s reads several LFS sha256s in one request, leaving out missing paths.")
+
+
 class _ShaHub:
     """Answers file_sha256 from a map of repo path to sha256."""
 
