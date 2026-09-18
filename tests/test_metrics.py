@@ -242,6 +242,38 @@ def test_a_choice_letter_alone_on_its_line_is_still_a_choice() -> None:
     print("PASS: a choice letter alone on its line is still a choice.")
 
 
+def test_a_windows_line_ending_after_the_letter_is_still_a_choice() -> None:
+    """A model's output can end its lines with CRLF, and A must score like B there."""
+    a = _row("commonsense", commonsense_answer="A. the kettle is boiling")
+    b = _row("commonsense", commonsense_answer="B. the kettle is boiling")
+
+    answer_on_its_own_line = "{}\r\nBecause the dog is barking"
+    assert metrics.metric_value(b, answer_on_its_own_line.format("B")) == 1.0
+    assert metrics.metric_value(a, answer_on_its_own_line.format("A")) == 1.0
+
+    print("PASS: a Windows line ending after the letter is still a choice.")
+
+
+def test_punctuation_inside_a_word_is_not_a_choice_marker() -> None:
+    """An apostrophe or hyphen that joins A or I to a word leaves prose, not a choice.
+
+    Otherwise "I'm not sure" hits choice I and "A-weighted noise" hits choice A,
+    the very mistake the A/I rule exists to prevent.
+    """
+    a = _row("commonsense", commonsense_answer="A. the kettle is boiling")
+    eye = _row("commonsense", commonsense_answer="I. the kettle is boiling")
+
+    assert metrics.metric_value(eye, "I'm not sure") == 0.0
+    assert metrics.metric_value(a, "A-weighted noise") == 0.0
+    # Punctuation that ends the letter is still a marker.
+    assert metrics.metric_value(a, "A. the kettle") == 1.0
+    assert metrics.metric_value(a, "(A) the kettle") == 1.0
+    assert metrics.metric_value(eye, "I: the kettle") == 1.0
+    assert metrics.metric_value(a, "A.") == 1.0
+
+    print("PASS: punctuation inside a word is not a choice marker.")
+
+
 def test_every_row_with_a_prediction_counts_in_its_hit_rate_group() -> None:
     """The spec's inclusion rule, taken as written.
 

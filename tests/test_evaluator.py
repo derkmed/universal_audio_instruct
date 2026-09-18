@@ -314,6 +314,41 @@ def test_an_unavailable_metric_is_complained_about_once_per_run() -> None:
     print("PASS: an unavailable metric is complained about once, not per row.")
 
 
+def test_a_metric_that_will_not_load_is_complained_about_once() -> None:
+    """The first failed load and every remembered one after it are the same news.
+
+    The test above raises one constant error, so it can't see this: the first
+    load fails with the Hub's own error, later rows get the remembered reason,
+    and if those two read differently the complaint prints twice.
+    """
+    import contextlib
+    import io as _io
+
+    from eval import metrics as metrics_module
+
+    def _failing_load(name: str) -> NoReturn:
+        raise ConnectionError("hub down")
+
+    original = (metrics_module.hf_evaluate.load, metrics_module._wer_metric,
+                metrics_module._wer_load_error)
+    (metrics_module.hf_evaluate.load, metrics_module._wer_metric,
+     metrics_module._wer_load_error) = (_failing_load, None, None)
+    chatter = _io.StringIO()
+    try:
+        with contextlib.redirect_stdout(chatter):
+            _run(list(ROWS), clips_per_split=1)
+    finally:
+        (metrics_module.hf_evaluate.load, metrics_module._wer_metric,
+         metrics_module._wer_load_error) = original
+
+    complaints = [line for line in chatter.getvalue().splitlines()
+                  if "metric unavailable" in line]
+    assert len(complaints) == 1, complaints
+    assert "hub down" in complaints[0], complaints
+
+    print("PASS: a metric that will not load is complained about once.")
+
+
 def test_a_render_failure_keeps_the_utterance_it_failed_on() -> None:
     """One clip renders one row per utterance, so the index is what tells them apart."""
     rows = LoadedRows([], LoadReport(

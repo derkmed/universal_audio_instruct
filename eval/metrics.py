@@ -76,7 +76,16 @@ _WORD_LETTERS = frozenset("ai")
 # answers "B\nBecause ..." has put the letter on its own line, not opened a
 # sentence with it -- so it counts as a marker. Without that, "A\nBecause ..."
 # and "B\nBecause ..." score differently on identical formatting.
-_MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])[ \t]*(?:[^\w\s]|\n|$)")
+#
+# The line break may be CRLF: `[\r\n]` rather than `\n`, or "A\r\nBecause ..."
+# would miss where "B\r\nBecause ..." hits.
+#
+# Punctuation is a marker only when it ends the letter. Followed straight by a
+# word character it joins the letter to a word -- "I'm not sure", "A-weighted
+# noise" -- and that is prose opening with A or I, the very thing this rule is
+# here to keep from reading as a choice.
+_MARKED_CHOICE_LETTER = re.compile(
+    r"^[^\w]*([A-Za-z])[ \t]*(?:[^\w\s](?!\w)|[\r\n]|$)")
 
 # Loaded lazily and kept, because `evaluate.load` reads from disk on every call.
 _wer_metric: Optional[Any] = None
@@ -270,5 +279,8 @@ def _wer(*, predictions: list[str], references: list[str]) -> float:
         except Exception as error:
             _wer_load_error = (
                 f"could not load the {WER} metric: {type(error).__name__}: {error}")
-            raise
+            # The same exception, first time and every time after: the caller
+            # complains once per distinct error, so a first failure worded
+            # differently from the remembered ones would be complained about twice.
+            raise RuntimeError(_wer_load_error) from error
     return float(_wer_metric.compute(predictions=predictions, references=references))
