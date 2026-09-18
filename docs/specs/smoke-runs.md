@@ -44,9 +44,9 @@ test dependencies, so the build needs a venv built from `requirements.txt`. CPU
 | S4 | `eval.main.build_parser()` and `train.main.build_parser()` | `--clips-per-split`, `--seed`, the `--split` default, and `--max-samples` being gone | adds `torch` and `transformers`, which both modules import at load time (no GPU needed) |
 | S5 | `Evaluator(backend, config).evaluate(rows)`, with a fake `ModelBackend` subclass and a temporary `output_dir` | Row statuses; groups and pass/fail; `results.jsonl`; `summary.json`; the console table; smoke-run tolerance vs regular-run raising; no second truncation | all of `requirements.txt` (no GPU). Tiny WAVs are written with `soundfile`; garbage bytes trigger `audio_error` |
 
-The S1 hub fake gains one function (N4). It also has to serve two new paths,
-`smoke/manifest.json` and `smoke/<name>.tar.gz`, which the loader fetches through
-the existing `hub.download_file`.
+The S1 hub fake gains one function (N4's `file_versions`). It also has to serve
+two new paths, `smoke/manifest.json` and `smoke/<name>.tar.gz`, which the loader
+fetches through the existing `hub.download_file`.
 
 ### New seams (each justified)
 
@@ -55,7 +55,7 @@ the existing `hub.download_file`.
 | N1 | A pure scoring function for each task in a new `eval/metrics.py` (e.g. `score(task, row, prediction)`), plus the group aggregate | The six preliminary metrics have fiddly normalisation rules: case, punctuation, `_` as a space, choice letters, "every number". A table of cases is much cheaper to test here than through S5. S5 still checks that metric values reach `results.jsonl` and `summary.json`. |
 | N2 | The core of the smoke-archive builder: given a source tar stream, each split's set of `audio_path`s, and N, it writes the smoke tar and returns the clips copied per split plus any read error | A smoke run must see exactly the clips the full archive would give. That makes this new code worth testing against synthetic archives, including a truncated one. The Hub download and upload around it stay thin. |
 | N3 | A pure function that combines the five `complete-*` config dicts into `complete.json` | New command with a tiny core. Order, fields and provenance can all be tested without the Hub. |
-| N4 | One new `uad_data.hub` function that returns a repo file's current LFS sha256 | This is the only new network call. The loader's staleness check and the builder's safety check both use it, and the S1 and N2 fakes replace it. |
+| N4 | New `uad_data.hub` lookups of files' current versions on the Hub: `file_sha256` (one LFS file's sha256) and `file_versions` (several files' versions in one request; an LFS file's version is its sha256) | The loader's staleness check (`file_versions`) and the builder's safety check (`file_sha256`) use them, and the S1 and N2 fakes replace them. They and `current_commit` are the new network calls. `current_commit` resolves `main`'s commit for the builder's Hub mode (see [Smoke archives](#smoke-archives-11)); it's a one-line wrapper over `HfApi.dataset_info`, so it has no seam of its own. **(PR [#60] review)** |
 
 ### Not unit-tested
 
@@ -171,10 +171,16 @@ the existing `hub.download_file`.
   - a row filter other than `all_pass`. A smoke archive holds the first N clips
     whatever the filter, so with a rejecting filter it could give fewer clips,
     or different ones, than the full archive. **(grill)**
-- **Staleness check:** on every run, the loader compares the full archive's
-  sha256 recorded in the manifest with its current sha256 on the Hub, using one
-  small metadata request.
-  - If they differ, it logs a warning and falls back to the full archive.
+- **Staleness check:** on every run, the loader compares what the manifest
+  recorded with what's on the Hub now, using one small metadata request for
+  every internal dataset:
+  - the full archive's sha256;
+  - the version of the metadata JSON of each split the run config lists for the
+    internal dataset. The build picked each split's clips from that file, so a
+    re-split with an unchanged archive also makes a smoke archive stale.
+    **(PR [#60] review)**
+  - If anything differs, or is gone from the Hub, it logs a warning and falls
+    back to the full archive.
   - If the check can't run (e.g. offline), it logs a warning and uses the smoke
     archive anyway.
 - **A read error recorded at build time (grill):** a smoke archive should report
@@ -398,6 +404,9 @@ means audio samples. [#12] renamed it separately, to `max_audio_samples`.
   - N;
   - the number of clips each split received;
   - the sha256 of the full archive the smoke archive was built from;
+  - the version of each registered split's metadata JSON it picked clips from
+    (its LFS sha256, or its git blob id if it isn't stored with LFS)
+    **(PR [#60] review)**;
   - the Hub revision it was built at;
   - the read error that stopped the build, if any. **(grill)**
 - The archives are built with
@@ -605,8 +614,10 @@ The existing `test_random_templates_are_picked_per_utterance`
 
 ### 6. Smoke archives and `complete.json`, in code (N2, N3, N4, S1)
 
-- **N4:** add a `hub` function that returns a file's current LFS sha256 (e.g.
-  via `HfApi.get_paths_info`).
+- **N4:** add `hub` functions that return files' current versions via
+  `HfApi.get_paths_info`: `file_sha256` for one LFS file, and `file_versions`
+  for several files in one request. Also add `current_commit` for the builder's
+  Hub mode. **(PR [#60] review)**
 - **N3 and `python -m uad_data.build_complete_config`:** build `complete.json`
   from `complete-1..5`.
   - Test the pure core with the five configs as dicts. N3 checks order, the
@@ -755,7 +766,8 @@ See [Acceptance](#acceptance).
   datasets of `complete-1..5` in order, and records its sources.
 - [ ] `smoke/` holds one archive for each of those 23 internal datasets, plus
   `manifest.json`. The manifest has N, clip counts per split, the source
-  sha256, the revision, and MLEnd_Intonation's read error.
+  sha256, each split's metadata version, the revision, and MLEnd_Intonation's
+  read error.
 - [ ] The Hub README describes `smoke/`, and its onboarding guide has the
   rebuild step.
 - [ ] The Hub README's usage example and config format use the new names, and
@@ -802,3 +814,4 @@ See [Acceptance](#acceptance).
 [#18]: https://github.com/derkmed/universal_audio_instruct/issues/18
 [#20]: https://github.com/derkmed/universal_audio_instruct/issues/20
 [#36]: https://github.com/derkmed/universal_audio_instruct/issues/36
+[#60]: https://github.com/derkmed/universal_audio_instruct/pull/60
