@@ -236,7 +236,7 @@ def _archive_sources(
         d.name: manifest[d.name] for d in internal_datasets
         if _smoke_fits(d.name, manifest.get(d.name), clips_per_split)
     }
-    current = _current_sha256s(
+    current = _current_versions(
         [d for d in internal_datasets if d.name in fitting],
         repo_id=repo_id, revision=revision, token=token)
     return {d.name: _smoke_or_stream(d, fitting.get(d.name), current)
@@ -280,30 +280,51 @@ def _smoke_fits(name: str, entry: smoke.SmokeEntry | None, clips_per_split: int)
     return True
 
 
-def _current_sha256s(
+def _metadata_paths(internal_dataset: InternalDataset) -> dict[str, str]:
+    """Split -> repo path of its metadata JSON, for each split the run config lists."""
+    return {str(split): hub.to_repo_path(internal_dataset.split_metadata_path(split))
+            for split in internal_dataset.get_splits()}
+
+
+def _current_versions(
     internal_datasets: list[InternalDataset],
     *,
     repo_id: str,
     revision: str | None,
     token: str | None,
 ) -> dict[str, str] | None:
-    """Repo path -> current LFS sha256 of these full archives, from one metadata request.
+    """Repo path -> current Hub version of each full archive and listed metadata JSON.
 
-    An archive that's gone from the Hub is left out. Returns None, with a
-    warning, when the check can't run (offline, say): the smoke archives are
-    then used anyway.
+    One metadata request covers every internal dataset. A file that's gone from
+    the Hub is left out. Returns None, with a warning, when the check can't run
+    (offline, say): the smoke archives are then used anyway.
     """
     if not internal_datasets:
         return {}
+    paths = []
+    for d in internal_datasets:
+        paths += [hub.to_repo_path(d.data_url), *_metadata_paths(d).values()]
     try:
-        return hub.file_sha256s(
-            [d.data_url for d in internal_datasets],
-            repo_id=repo_id, revision=revision, token=token)
+        return hub.file_versions(paths, repo_id=repo_id, revision=revision, token=token)
     except Exception as error:  # noqa: BLE001 -- any failure means the check can't run.
         logger.warning(
             "Could not check whether the smoke archives of %s are stale, so using them "
             "anyway: %s", ", ".join(d.name for d in internal_datasets), describe_error(error))
         return None
+
+
+def _stale_parts(
+    internal_dataset: InternalDataset, entry: smoke.SmokeEntry, current: dict[str, str],
+) -> list[str]:
+    """What changed on the Hub since the smoke build: the archive, and splits' metadata."""
+    changed = []
+    if current.get(hub.to_repo_path(internal_dataset.data_url)) != entry.source_sha256:
+        changed.append("the full archive")
+    for split, path in _metadata_paths(internal_dataset).items():
+        recorded = entry.metadata_versions.get(split)
+        if recorded is None or current.get(path) != recorded:
+            changed.append(f"the {split} metadata")
+    return changed
 
 
 def _smoke_or_stream(
@@ -313,17 +334,17 @@ def _smoke_or_stream(
 ) -> ArchiveSource:
     """An internal dataset's smoke archive when it fits and is fresh, else its streamed full archive.
 
-    `current` holds the full archives' current sha256s; None means the check
+    `current` holds the Hub's current file versions; None means the check
     couldn't run, so a fitting smoke archive counts as fresh.
     """
     name = internal_dataset.name
     if entry is None:
         return ArchiveSource(internal_dataset.data_url, stream=True)
-    archive_path = hub.to_repo_path(internal_dataset.data_url)
-    if current is not None and current.get(archive_path) != entry.source_sha256:
+    changed = [] if current is None else _stale_parts(internal_dataset, entry, current)
+    if changed:
         logger.warning(
-            "Streaming the full archive of %s: its smoke archive is stale, built "
-            "from a full archive that has since changed or gone.", name)
+            "Streaming the full archive of %s: its smoke archive is stale, because %s "
+            "changed or went since it was built.", name, " and ".join(changed))
         return ArchiveSource(internal_dataset.data_url, stream=True)
     return ArchiveSource(
         smoke.smoke_archive_path(name), stream=False, recorded_error=entry.error)

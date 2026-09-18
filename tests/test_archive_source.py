@@ -63,6 +63,8 @@ def _add_smoke(root: str, fixture: dict, datasets: dict, n: int, skip: tuple) ->
         served[f"smoke/{name}.tar.gz"] = path
         entries[name] = smoke.SmokeEntry(
             clips_per_split=n, clips=build.clips, source_sha256=_sha256(full),
+            metadata_versions={split: _sha256(fixture["files"][f"{name}_{split}.json"])
+                               for split in spec["splits"]},
             revision="abc123", error=build.error)
     manifest = os.path.join(smoke_dir, "manifest.json")
     smoke.write_manifest(entries, manifest)
@@ -98,8 +100,8 @@ class _Logs(logging.Handler):
 
 
 def _load(datasets: dict, config: dict, *, built_n: int = 3, skip: tuple = (),
-          manifest: bool = True, truncate: dict | None = None, sha256: dict | None = None,
-          sha256_error: Exception | None = None, prompts: tuple[dict, ...] = (),
+          manifest: bool = True, truncate: dict | None = None, versions: dict | None = None,
+          version_error: Exception | None = None, prompts: tuple[dict, ...] = (),
           **kwargs: object) -> "Loaded":
     """Load with smoke archives on the fake Hub; return the rows, the fake and the log lines."""
     with fx.tempfile.TemporaryDirectory() as root:
@@ -113,10 +115,10 @@ def _load(datasets: dict, config: dict, *, built_n: int = 3, skip: tuple = (),
                 f.truncate(int(os.path.getsize(fixture["files"][base]) * fraction))
         if manifest:
             _add_smoke(root, fixture, datasets, built_n, skip)
-        fixture["sha256"] = sha256 or {}
+        fixture["versions"] = versions or {}
         fake = fx._FakeHub(fixture)
-        if sha256_error is not None:
-            fake.file_sha256s = _raising(sha256_error)
+        if version_error is not None:
+            fake.file_versions = _raising(version_error)
         with fx._patched_hub(fake), _Logs() as logs:
             rows = fx.loader.load_uad_dataset(
                 json_config_path=fixture["config_path"], token=None, **kwargs)
@@ -135,9 +137,9 @@ class Loaded:
 
 
 def _raising(error: Exception) -> Callable[..., dict]:
-    def file_sha256s(*args: object, **kwargs: object) -> dict:
+    def file_versions(*args: object, **kwargs: object) -> dict:
         raise error
-    return file_sha256s
+    return file_versions
 
 
 def test_a_capped_run_reads_a_fresh_smoke_archive() -> None:
@@ -145,7 +147,7 @@ def test_a_capped_run_reads_a_fresh_smoke_archive() -> None:
 
     assert fake.opens == ["smoke/Clotho.tar.gz"], fake.opens
     assert fake.reads == {}, "the full archive was streamed"
-    assert fake.sha256_checks == ["Clotho.tar.gz"], fake.sha256_checks
+    assert fake.version_requests == 1, fake.version_requests
     assert not any("full archive" in line for line in logs.lines()), logs.lines()
 
     # Exactly the rows the full archive gives.
@@ -209,8 +211,10 @@ def test_the_staleness_check_is_one_request_for_every_internal_dataset() -> None
     rows, fake, logs = _load(CLOTHO_AND_EMNS, CLOTHO_AND_EMNS_CONFIG,
                              split="all", clips_per_split=1)
 
-    assert fake.sha256_requests == 1, fake.sha256_requests
-    assert sorted(fake.sha256_checks) == ["Clotho.tar.gz", "EMNS.tar.gz"], fake.sha256_checks
+    assert fake.version_requests == 1, fake.version_requests
+    assert sorted(fake.version_checks) == [
+        "Clotho.tar.gz", "Clotho_test.json", "Clotho_train.json", "Clotho_validation.json",
+        "EMNS.tar.gz", "EMNS_train.json"], fake.version_checks
     assert fake.opens == ["smoke/EMNS.tar.gz", "smoke/Clotho.tar.gz"], fake.opens
 
     print("PASS: one metadata request checks every smoke archive for staleness.")
@@ -248,7 +252,7 @@ def test_no_manifest_streams_every_full_archive() -> None:
 
 def test_a_stale_smoke_archive_is_skipped_with_a_warning() -> None:
     rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(),
-                             sha256={"Clotho.tar.gz": "0" * 64},
+                             versions={"Clotho.tar.gz": "0" * 64},
                              split="all", clips_per_split=1)
 
     _streamed_full(fake, logs, "Clotho", level=logging.WARNING)
@@ -257,9 +261,34 @@ def test_a_stale_smoke_archive_is_skipped_with_a_warning() -> None:
     print("PASS: a stale smoke archive is skipped with a warning.")
 
 
+def test_changed_metadata_makes_the_smoke_archive_stale() -> None:
+    """The smoke build picked its clips from the metadata; a re-split changes them."""
+    rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(),
+                             versions={"Clotho_test.json": "re-split"},
+                             split="all", clips_per_split=1)
+
+    _streamed_full(fake, logs, "Clotho", level=logging.WARNING)
+    assert any("Clotho" in line and "stale" in line and "test" in line
+               for line in logs.lines(logging.WARNING)), logs.lines()
+
+    print("PASS: a changed metadata JSON makes the smoke archive stale.")
+
+
+def test_metadata_of_a_split_the_run_config_leaves_out_does_not_matter() -> None:
+    config = {"name": "Clotho test only",
+              "datasets": [{"name": "Clotho", "tasks": ["caption"], "splits": ["test"]}]}
+    rows, fake, logs = _load(fx.CLOTHO, config, versions={"Clotho_train.json": "re-split"},
+                             split="all", clips_per_split=1)
+
+    assert fake.opens == ["smoke/Clotho.tar.gz"], fake.opens
+    assert "Clotho_train.json" not in fake.version_checks, fake.version_checks
+
+    print("PASS: only the metadata of splits the run config lists is checked.")
+
+
 def test_a_sha256_check_that_cannot_run_uses_the_smoke_archive_with_a_warning() -> None:
     rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(),
-                             sha256_error=OSError("offline"),
+                             version_error=OSError("offline"),
                              split="all", clips_per_split=1)
 
     assert fake.opens == ["smoke/Clotho.tar.gz"], fake.opens
@@ -271,7 +300,7 @@ def test_a_sha256_check_that_cannot_run_uses_the_smoke_archive_with_a_warning() 
 
 
 def test_a_full_archive_gone_from_the_hub_counts_as_stale() -> None:
-    rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(), sha256={"Clotho.tar.gz": None},
+    rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(), versions={"Clotho.tar.gz": None},
                              split="all", clips_per_split=1)
 
     _streamed_full(fake, logs, "Clotho", level=logging.WARNING)
@@ -325,7 +354,7 @@ def test_a_manifest_that_cannot_be_fetched_warns() -> None:
 
 def test_a_malformed_manifest_warns_and_streams_full_archives() -> None:
     entry = {"clips_per_split": 3, "clips": {"test": 3}, "source_sha256": "0" * 64,
-             "revision": "abc123"}
+             "metadata_versions": {"test": "0" * 64}, "revision": "abc123"}
     for content in ("{\"datasets\": {", json.dumps({"archives": {}}),
                     json.dumps({"datasets": {"Clotho": {**entry, "added_later": 1}}})):
         rows, fake, logs = _load_with_manifest_download(_serve(content))
@@ -354,7 +383,7 @@ def test_an_explicit_stream_bypasses_smoke_archives() -> None:
         assert fake.opens == ["Clotho.tar.gz"], (stream, fake.opens)
         assert ("Clotho.tar.gz" in fake.reads) is stream, (stream, fake.reads)
         assert not any(p.startswith("smoke/") for p in fake.downloads), fake.downloads
-        assert fake.sha256_checks == [], fake.sha256_checks
+        assert fake.version_checks == [], fake.version_checks
 
     print("PASS: an explicit stream bypasses smoke archives.")
 

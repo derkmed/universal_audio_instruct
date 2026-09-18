@@ -127,9 +127,10 @@ class _FakeHub:
     """Serves fixture files by basename and records every archive open.
 
     Paths under `smoke/` are served from the fixture's optional `smoke` map,
-    keyed by repo path; any other `smoke/` path is not on this Hub. An archive's
-    LFS sha256 is its file's own, unless the fixture's `sha256` map overrides it;
-    an override of None means the archive is gone from the Hub.
+    keyed by repo path; any other `smoke/` path is not on this Hub. A file's Hub
+    version (an archive's LFS sha256, a metadata JSON's version) is the sha256 of
+    its fixture file, unless the fixture's `versions` map, keyed by basename,
+    overrides it; an override of None means the file is gone from the Hub.
     """
 
     def __init__(self, fx: dict):
@@ -137,8 +138,8 @@ class _FakeHub:
         self.opens: list[str] = []
         self.reads: dict[str, dict] = {}
         self.downloads: list[str] = []
-        self.sha256_checks: list[str] = []
-        self.sha256_requests = 0
+        self.version_checks: list[str] = []
+        self.version_requests = 0
 
     def download_file(self, path_or_url, *, repo_id=None, revision=None, token=None):
         path = hub.to_repo_path(path_or_url)
@@ -160,17 +161,17 @@ class _FakeHub:
             self.opens.append(path)
         return smoke[path]
 
-    def file_sha256s(self, paths_or_urls, *, repo_id=None, revision=None, token=None):
-        self.sha256_requests += 1
-        shas = {}
+    def file_versions(self, paths_or_urls, *, repo_id=None, revision=None, token=None):
+        self.version_requests += 1
+        versions = {}
         for path_or_url in paths_or_urls:
             path = hub.to_repo_path(path_or_url)
             base = os.path.basename(path)
-            self.sha256_checks.append(base)
-            sha = self.fx.get("sha256", {}).get(base, self._own_sha256(base))
-            if sha is not None:
-                shas[path] = sha
-        return shas
+            self.version_checks.append(base)
+            version = self.fx.get("versions", {}).get(base, self._own_sha256(base))
+            if version is not None:
+                versions[path] = version
+        return versions
 
     def _own_sha256(self, base: str) -> str:
         with open(self.fx["files"][base], "rb") as f:
@@ -189,7 +190,7 @@ class _FakeHub:
 @contextlib.contextmanager
 def _patched_hub(fake: _FakeHub):
     """Swap hub.* for the fake's methods, restoring them and PROMPTS_DIR on exit."""
-    names = ("download_file", "open_archive_stream", "download_prompts_dir", "file_sha256s")
+    names = ("download_file", "open_archive_stream", "download_prompts_dir", "file_versions")
     originals = {name: getattr(hub, name) for name in names}
     original_prompts_dir = prompts.PROMPTS_DIR
     for name in names:

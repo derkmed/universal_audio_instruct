@@ -6,7 +6,8 @@ plain files -- there is no `trust_remote_code` and no executable dataset script
 on the Hub. Assets fetched: per-dataset audio archives (`data/<name>/<name>.tar.gz`),
 per-split metadata JSONs, prompt templates (`prompts/*.json`), named configs
 (`universal_audio_dataset_configs/*.json`), and smoke archives with their manifest
-(`smoke/`). It also reads a file's LFS sha256 and the current commit of a branch.
+(`smoke/`). It also reads files' versions (an LFS file's sha256) and the current
+commit of a branch.
 
 A file that isn't on the Hub raises `EntryNotFoundError`. So does one that can't
 be fetched because the Hub is unreachable and it isn't cached: that raises the
@@ -99,29 +100,30 @@ def download_prompts_dir(
     return os.path.join(local_repo, "prompts")
 
 
-def file_sha256s(
+def _paths_info(rels: list[str], *, repo_id: str, revision: str | None,
+                token: str | None) -> list:
+    """The Hub's file info for each of `rels` that's there, from one metadata request."""
+    return HfApi(token=token).get_paths_info(
+        repo_id, rels, revision=revision, repo_type="dataset")
+
+
+def file_versions(
     paths_or_urls: list[str],
     *,
     repo_id: str = DEFAULT_REPO_ID,
     revision: str | None = None,
     token: str | None = None,
 ) -> dict[str, str]:
-    """Return repo path -> LFS sha256 at `revision` for each path, in one metadata request.
+    """Return repo path -> version at `revision` for each path, in one metadata request.
 
-    Paths that aren't there are left out. Raises ValueError for a path that isn't
-    stored with LFS (only LFS files have a sha256 on the Hub).
+    An LFS file's version is its sha256; any other file's is its git blob id.
+    Either changes whenever the file's content does. Paths that aren't there are
+    left out.
     """
-    rels = [to_repo_path(p) for p in paths_or_urls]
-    infos = HfApi(token=token).get_paths_info(
-        repo_id, rels, revision=revision, repo_type="dataset")
-    shas = {}
-    for info in infos:
-        lfs = getattr(info, "lfs", None)
-        if lfs is None:
-            raise ValueError(
-                f"{info.path} is not an LFS file, so the Hub records no sha256 for it.")
-        shas[info.path] = lfs.sha256
-    return shas
+    infos = _paths_info([to_repo_path(p) for p in paths_or_urls],
+                        repo_id=repo_id, revision=revision, token=token)
+    return {info.path: info.lfs.sha256 if info.lfs is not None else info.blob_id
+            for info in infos}
 
 
 def file_sha256(
@@ -134,13 +136,16 @@ def file_sha256(
     """Return one repo file's LFS sha256 at `revision`.
 
     Raises `EntryNotFoundError` when the file isn't there, and ValueError when it
-    isn't stored with LFS.
+    isn't stored with LFS (only LFS files have a sha256 on the Hub).
     """
     rel = to_repo_path(path_or_url)
-    shas = file_sha256s([rel], repo_id=repo_id, revision=revision, token=token)
-    if rel not in shas:
+    infos = _paths_info([rel], repo_id=repo_id, revision=revision, token=token)
+    if not infos:
         raise EntryNotFoundError(f"{rel} is not in {repo_id} at {revision or 'main'}.")
-    return shas[rel]
+    lfs = getattr(infos[0], "lfs", None)
+    if lfs is None:
+        raise ValueError(f"{rel} is not an LFS file, so the Hub records no sha256 for it.")
+    return lfs.sha256
 
 
 def current_commit(
