@@ -133,18 +133,27 @@ def main() -> None:
 
     # A smoke run is a check, so its exit status reports what it found. A regular
     # run exits 0 unless something raised, even when a group fails on
-    # empty_output. Name the cause: an operator whose archive was truncated
-    # shouldn't be sent looking for a failing group in an all-PASS table.
+    # empty_output.
     if config.is_smoke_run and not summary["passed"]:
-        causes = []
-        if any(not group["passed"] for group in summary["groups"]):
-            causes.append("failing groups")
-        if summary["load_failures"]:
-            causes.append("internal datasets that failed to load")
-        if not summary["groups"]:
-            causes.append("no groups at all — nothing was evaluated")
         raise SystemExit(
-            f"Smoke run finished with {' and '.join(causes)}. See the table above.")
+            f"Smoke run finished with {' and '.join(_smoke_failure_causes(summary))}. "
+            "See the table above.")
+
+
+def _smoke_failure_causes(summary: dict) -> list[str]:
+    """Why a smoke run failed, in words.
+
+    Named, because an operator whose archive was truncated shouldn't be sent
+    looking for a failing group in an all-PASS table.
+    """
+    causes = []
+    if any(not group["passed"] for group in summary["groups"]):
+        causes.append("failing groups")
+    if summary["load_failures"]:
+        causes.append("internal datasets that failed to load")
+    if not summary["groups"]:
+        causes.append("no groups at all — nothing was evaluated")
+    return causes
 
 
 if __name__ == "__main__":

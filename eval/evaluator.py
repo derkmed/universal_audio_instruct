@@ -17,12 +17,13 @@ a caller with no `output_dir` -- the Colab notebook -- still sees everything.
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from functools import partial
-from typing import List, Optional
+from typing import Any, Callable, Iterable, List, Optional, TextIO
 
 from uad_data.audio_utils import preprocess_audio
-from uad_data.load_report import LoadReport
+from uad_data.load_report import LoadReport, RenderFailure
 from . import metrics
 from .backends.base import InferenceRequest, ModelBackend
 from .config import EvalConfig
@@ -30,6 +31,11 @@ from .config import EvalConfig
 
 # Every way a row can end. `ok` is the only one a passing group may contain.
 STATUSES = ("ok", "empty_output", "render_error", "audio_error", "model_error")
+
+# A group: its internal dataset, split and task.
+_GroupKey = tuple[str, str, str]
+# One row that has a prediction, as its group's metric is computed over it.
+_Predicted = tuple[dict, str]
 
 
 def _batched(iterable, n: int):
@@ -59,34 +65,61 @@ def print_group_table(summary: dict) -> None:
     # `split clips`, not `clips`: the count belongs to the whole split, so every
     # task group of one split repeats it rather than each finding that many.
     columns = ["group", "split clips", "rows", *STATUSES, "metric", "result"]
-    lines = [columns]
-    for group in summary["groups"]:
-        found, group_cap = group["clips_found"], group["clips_per_split"]
-        clips = "-" if found is None else (
-            str(found) if group_cap is None else f"{found}/{group_cap}")
-        value = group["metric_value"]
-        metric = "-" if group["metric"] is None or value is None else (
-            f"{group['metric']} {value:.4f}")
-        lines.append([
-            f"{group['originating_dataset']}/{group['split']}/{group['task']}",
-            clips,
-            str(group["rows"]),
-            *(str(group["statuses"][status]) for status in STATUSES),
-            metric,
-            "PASS" if group["passed"] else "FAIL",
-        ])
+    _print_aligned([columns, *(_table_line(group) for group in summary["groups"])])
 
-    widths = [max(len(line[i]) for line in lines) for i in range(len(columns))]
+    _print_short_split_warnings(summary["groups"])
+
+    for failure in summary["load_failures"]:
+        print(f"  FAILED TO LOAD {failure['dataset']}: {failure['error']} "
+              f"({failure['rows_kept']} rows kept)")
+
+    print(f"\nOverall: {'PASS' if summary['passed'] else 'FAIL'}")
+
+
+def _table_line(group: dict) -> list[str]:
+    """One group's cells in the group table, in `print_group_table`'s column order."""
+    return [
+        f"{group['originating_dataset']}/{group['split']}/{group['task']}",
+        _clips_cell(group),
+        str(group["rows"]),
+        *(str(group["statuses"][status]) for status in STATUSES),
+        _metric_cell(group),
+        "PASS" if group["passed"] else "FAIL",
+    ]
+
+
+def _clips_cell(group: dict) -> str:
+    found, cap = group["clips_found"], group["clips_per_split"]
+    if found is None:
+        return "-"
+    return str(found) if cap is None else f"{found}/{cap}"
+
+
+def _metric_cell(group: dict) -> str:
+    value = group["metric_value"]
+    if group["metric"] is None or value is None:
+        return "-"
+    return f"{group['metric']} {value:.4f}"
+
+
+def _print_aligned(lines: list[list[str]]) -> None:
+    """Print rows of cells with each column padded to its widest cell."""
+    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
     for line in lines:
         print("  " + "  ".join(cell.ljust(width) for cell, width in zip(line, widths)))
 
-    # A split that came up short of the cap is a warning, not a failure: the
-    # groups can still pass and the run can still exit 0, so without saying so
-    # a truncated archive reads as an ordinary green run.
+
+def _print_short_split_warnings(groups: list[dict]) -> None:
+    """Warn once per split that came up short of the cap.
+
+    A split that came up short of the cap is a warning, not a failure: the
+    groups can still pass and the run can still exit 0, so without saying so
+    a truncated archive reads as an ordinary green run.
+    """
     short = {
         (group["originating_dataset"], group["split"]):
             (group["clips_found"], group["clips_per_split"])
-        for group in summary["groups"]
+        for group in groups
         if group["clips_per_split"] is not None
         and group["clips_found"] is not None
         and group["clips_found"] < group["clips_per_split"]
@@ -95,11 +128,15 @@ def print_group_table(summary: dict) -> None:
         print(f"  WARNING {dataset}/{split} found {found} clips, "
               f"fewer than the {wanted} asked for")
 
-    for failure in summary["load_failures"]:
-        print(f"  FAILED TO LOAD {failure['dataset']}: {failure['error']} "
-              f"({failure['rows_kept']} rows kept)")
 
-    print(f"\nOverall: {'PASS' if summary['passed'] else 'FAIL'}")
+@dataclass
+class _RunLog:
+    """What a run has produced so far, and where its records are written."""
+    # Opened once per run; each record flushes to it so results survive a mid-run crash.
+    jsonl_file: Optional[TextIO]
+    records: List[dict] = field(default_factory=list)
+    # group key -> the (row, prediction) pairs its metric is computed over.
+    predicted: dict[_GroupKey, list[_Predicted]] = field(default_factory=dict)
 
 
 class Evaluator:
@@ -123,7 +160,9 @@ class Evaluator:
         # What this run has already said about unavailable metrics.
         self._metric_complaints: set[str] = set()
 
-    def _metric_or_none(self, metric_fn, *args):
+    def _metric_or_none(
+        self, metric_fn: Callable[..., Optional[float]], *args: Any,
+    ) -> Optional[float]:
         """A preliminary metric's value, or None if computing it failed.
 
         Metrics are information only -- "a group passes or fails on its row
@@ -147,7 +186,7 @@ class Evaluator:
                 print(f"  metric unavailable, so this run reports none: {described}")
             return None
 
-    def evaluate(self, dataset) -> dict:
+    def evaluate(self, dataset: Iterable[dict]) -> dict:
         rows = list(dataset)
         # Each call is its own run: one notebook kernel evaluates many times, so
         # a metric that failed to load earlier gets another chance here, and this
@@ -158,87 +197,110 @@ class Evaluator:
         # that hands over a plain list (the tests, the notebook) gets an empty one.
         report: LoadReport = getattr(dataset, "report", None) or LoadReport()
 
-        total = len(rows)
-        print(f"Evaluating {total} rows (batch_size={self.config.batch_size})")
+        print(f"Evaluating {len(rows)} rows (batch_size={self.config.batch_size})")
 
-        preprocess_fn = partial(
-            preprocess_audio,
-            target_sr=self.config.target_sr,
-            max_seconds=self.config.max_audio_seconds,
-        )
-
-        records: List[dict] = []
-        # group key -> the (row, prediction) pairs its metric is computed over.
-        predicted: dict[tuple[str, str, str], list[tuple[dict, str]]] = {}
-
-        # Opened once here; each batch flushes to it so results survive a mid-run crash.
-        jsonl_file = self._open_jsonl(self.config.output_dir)
+        log = _RunLog(self._open_jsonl(self.config.output_dir))
         try:
-            # One executor for the whole run, reused by every batch's preprocessing.
-            with ThreadPoolExecutor(max_workers=self.config.num_preprocessing_workers) as executor:
-                for batch in _batched(rows, self.config.batch_size):
-                    # Parallel audio decode + resample, then one GPU forward pass.
-                    prepared = self._preprocess_batch(batch, preprocess_fn, executor)
-                    predictions, batch_error = self._predict(
-                        [request for request in prepared if isinstance(request, InferenceRequest)])
-
-                    for row, request in zip(batch, prepared):
-                        if not isinstance(request, InferenceRequest):
-                            # The row never reached the model, but its prompt and
-                            # ground truth are its own, and triage wants them.
-                            record = self._record(
-                                len(records), row, status="audio_error",
-                                error=_describe(request))
-                        elif predictions is None:
-                            record = self._record(
-                                len(records), row, request=request, status="model_error",
-                                error=batch_error)
-                        else:
-                            prediction = predictions.pop(0)
-                            status = "ok" if prediction.strip() else "empty_output"
-                            record = self._record(
-                                len(records), row, request=request, status=status,
-                                prediction=prediction)
-                            predicted.setdefault(self._key(record), []).append((row, prediction))
-
-                        records.append(record)
-                        self._print_row(record, total)
-                        self._write(jsonl_file, record)
-
+            self._evaluate_rows(rows, log)
             # Rows the loader could never render reach the report, not the model.
             for failure in report.render_failures:
-                record = self._record(len(records), {
-                    "originating_dataset": failure.dataset,
-                    "split": failure.split,
-                    "task": failure.task,
-                    "audio_path": failure.audio_path,
-                    "utterance_index": failure.utterance_index,
-                }, status="render_error", error=failure.error)
-                records.append(record)
-                self._write(jsonl_file, record)
+                self._log(log, self._render_failure_record(len(log.records), failure))
         finally:
-            if jsonl_file:
-                jsonl_file.close()
+            if log.jsonl_file:
+                log.jsonl_file.close()
 
-        summary = self._summarise(records, predicted, report)
-        summary["rows"] = records
+        summary = self._summarise(log.records, log.predicted, report)
+        summary["rows"] = log.records
 
         print_group_table(summary)
-
-        if self.config.output_dir:
-            summary_path = os.path.join(self.config.output_dir, "summary.json")
-            with open(summary_path, "w", encoding="utf-8") as f:
-                json.dump({k: v for k, v in summary.items() if k != "rows"}, f, indent=2)
-            print(f"Results saved → {self.config.output_dir}/")
-
+        self._save_summary(summary)
         return summary
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _evaluate_rows(self, rows: List[dict], log: _RunLog) -> None:
+        """Run every row through the model, batch by batch, logging each record."""
+        preprocess_fn = partial(
+            preprocess_audio,
+            target_sr=self.config.target_sr,
+            max_seconds=self.config.max_audio_seconds,
+        )
+        # One executor for the whole run, reused by every batch's preprocessing.
+        with ThreadPoolExecutor(max_workers=self.config.num_preprocessing_workers) as executor:
+            for batch in _batched(rows, self.config.batch_size):
+                self._evaluate_batch(batch, preprocess_fn, executor, log, total=len(rows))
+
+    def _evaluate_batch(
+        self,
+        batch: List[dict],
+        preprocess_fn: Callable[[bytes], Any],
+        executor: ThreadPoolExecutor,
+        log: _RunLog,
+        *,
+        total: int,
+    ) -> None:
+        # Parallel audio decode + resample, then one GPU forward pass.
+        prepared = self._preprocess_batch(batch, preprocess_fn, executor)
+        predictions, batch_error = self._predict(
+            [request for request in prepared if isinstance(request, InferenceRequest)])
+
+        for row, request in zip(batch, prepared):
+            record = self._batch_record(
+                len(log.records), row, request, predictions, batch_error)
+            if record["prediction"] is not None:
+                log.predicted.setdefault(self._key(record), []).append(
+                    (row, record["prediction"]))
+            self._print_row(record, total)
+            self._log(log, record)
+
+    def _batch_record(
+        self,
+        index: int,
+        row: dict,
+        request: InferenceRequest | BaseException,
+        predictions: Optional[List[str]],
+        batch_error: Optional[str],
+    ) -> dict:
+        """One batch row's record. Takes this row's prediction off `predictions`."""
+        if not isinstance(request, InferenceRequest):
+            # The row never reached the model, but its prompt and ground truth
+            # are its own, and triage wants them.
+            return self._record(index, row, status="audio_error", error=_describe(request))
+        if predictions is None:
+            return self._record(
+                index, row, request=request, status="model_error", error=batch_error)
+        prediction = predictions.pop(0)
+        status = "ok" if prediction.strip() else "empty_output"
+        return self._record(
+            index, row, request=request, status=status, prediction=prediction)
+
+    def _render_failure_record(self, index: int, failure: RenderFailure) -> dict:
+        """The record of a row the loader could never render."""
+        return self._record(index, {
+            "originating_dataset": failure.dataset,
+            "split": failure.split,
+            "task": failure.task,
+            "audio_path": failure.audio_path,
+            "utterance_index": failure.utterance_index,
+        }, status="render_error", error=failure.error)
+
+    def _log(self, log: _RunLog, record: dict) -> None:
+        log.records.append(record)
+        self._write(log.jsonl_file, record)
+
+    def _save_summary(self, summary: dict) -> None:
+        """Write `summary.json`, everything but the row records, when there is an output_dir."""
+        if not self.config.output_dir:
+            return
+        summary_path = os.path.join(self.config.output_dir, "summary.json")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump({k: v for k, v in summary.items() if k != "rows"}, f, indent=2)
+        print(f"Results saved → {self.config.output_dir}/")
+
     @staticmethod
-    def _key(record: dict) -> tuple[str, str, str]:
+    def _key(record: dict) -> _GroupKey:
         """The group a record belongs to: its internal dataset, split and task."""
         return (record["originating_dataset"], record["split"], record["task"])
 
@@ -300,17 +362,7 @@ class Evaluator:
             return [], None
         try:
             predictions = list(self.backend.generate_batch(requests))
-            if len(predictions) != len(requests):
-                raise ValueError(
-                    f"backend returned {len(predictions)} predictions "
-                    f"for {len(requests)} requests")
-            # `None` is itself one of the wrong values, so the search can't use
-            # it as its "found nothing" marker.
-            wrong = [p for p in predictions if not isinstance(p, str)][:1]
-            if wrong:
-                raise TypeError(
-                    f"backend returned {type(wrong[0]).__name__}, "
-                    f"not text: {wrong[0]!r:.60}")
+            _check_predictions(predictions, requests)
         except Exception as error:
             if not self.config.is_smoke_run:
                 raise  # a regular run stops at the first error
@@ -330,7 +382,7 @@ class Evaluator:
         print(f"{' ' * (width * 2 + 4)}Pred: {record['prediction']}")
 
     @staticmethod
-    def _write(jsonl_file, record: dict) -> None:
+    def _write(jsonl_file: Optional[TextIO], record: dict) -> None:
         if not jsonl_file:
             return
         jsonl_file.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -347,8 +399,8 @@ class Evaluator:
 
     def _preprocess_batch(
         self,
-        batch: list,
-        preprocess_fn,
+        batch: List[dict],
+        preprocess_fn: Callable[[bytes], Any],
         executor: ThreadPoolExecutor,
     ) -> List[InferenceRequest | BaseException]:
         """Preprocess a batch's audio in parallel, one entry per row, in row order.
@@ -361,68 +413,37 @@ class Evaluator:
         # rather than raising in this thread and taking the run with it.
         futures = [executor.submit(lambda r=row: preprocess_fn(r["audio"]["bytes"]))
                    for row in batch]
+        return [self._request(row, future) for row, future in zip(batch, futures)]
 
-        prepared: List[InferenceRequest | BaseException] = []
-        for row, future in zip(batch, futures):
-            try:
-                audio_array = future.result()
-            except Exception as error:
-                if not self.config.is_smoke_run:
-                    raise  # a regular run stops at the first error
-                prepared.append(error)
-                continue
-            prepared.append(InferenceRequest(
-                audio_bytes=row["audio"]["bytes"],  # read once the decode succeeded
-                audio_array=audio_array,
-                sys_inst=(row.get("system_instruction") or "").strip(),
-                prompt_text=(row.get("prompt") or "").strip(),
-                ground_truth=(row.get("output") or "").strip(),
-                task=(row.get("task") or "").strip(),
-            ))
-        return prepared
+    def _request(self, row: dict, future: Future) -> InferenceRequest | BaseException:
+        """One row's request once its audio is decoded, or the decode's exception."""
+        try:
+            audio_array = future.result()
+        except Exception as error:
+            if not self.config.is_smoke_run:
+                raise  # a regular run stops at the first error
+            return error
+        return InferenceRequest(
+            audio_bytes=row["audio"]["bytes"],  # read once the decode succeeded
+            audio_array=audio_array,
+            sys_inst=(row.get("system_instruction") or "").strip(),
+            prompt_text=(row.get("prompt") or "").strip(),
+            ground_truth=(row.get("output") or "").strip(),
+            task=(row.get("task") or "").strip(),
+        )
 
-    def _summarise(self, records: List[dict], predicted: dict, report: LoadReport) -> dict:
+    def _summarise(
+        self,
+        records: List[dict],
+        predicted: dict[_GroupKey, list[_Predicted]],
+        report: LoadReport,
+    ) -> dict:
         """One entry per group, plus the failed loads and the run's overall result."""
-        groups: dict[tuple[str, str, str], dict] = {}
-
-        def entry(key: tuple[str, str, str], clips_found: Optional[int]) -> dict:
-            dataset, split, task = key
-            return groups.setdefault(key, {
-                # The internal dataset, named as the row records name it. The
-                # records' own `dataset` is the UAD repo, which is not this.
-                "originating_dataset": dataset,
-                "split": split,
-                "task": task,
-                "clips_found": clips_found,
-                "clips_per_split": self.config.clips_per_split,
-                "rows": 0,
-                "statuses": {status: 0 for status in STATUSES},
-                "metric": metrics.metric_name(task),
-                "metric_value": None,
-                "passed": False,
-            })
-
-        # The report names every selected split's groups, so a split that yielded
-        # no clips still has groups -- which fail, having no rows.
-        for split in report.splits:
-            for task in split.tasks:
-                entry((split.dataset, split.split, task), split.clips_found)
-
-        for record in records:
-            group = entry(self._key(record), None)
-            group["rows"] += 1
-            group["statuses"][record["status"]] += 1
-
-        for key, group in groups.items():
-            group["metric_value"] = self._metric_or_none(
-                metrics.aggregate, group["task"], predicted.get(key, []))
-            group["passed"] = group["rows"] > 0 and group["statuses"]["ok"] == group["rows"]
-
+        ordered = self._groups(records, predicted, report)
         load_failures = [
             {"dataset": f.dataset, "error": f.error, "rows_kept": f.rows_kept}
             for f in report.load_failures
         ]
-        ordered = list(groups.values())
         return {
             "model_choice": self.config.model_choice,
             "model": self.config.resolved_model_path,
@@ -433,3 +454,65 @@ class Evaluator:
             # A run passes when every group passed and nothing failed to load.
             "passed": bool(ordered) and all(g["passed"] for g in ordered) and not load_failures,
         }
+
+    def _groups(
+        self,
+        records: List[dict],
+        predicted: dict[_GroupKey, list[_Predicted]],
+        report: LoadReport,
+    ) -> List[dict]:
+        """Every group's `summary.json` entry, counted, measured and judged."""
+        groups: dict[_GroupKey, dict] = {}
+
+        # The report names every selected split's groups, so a split that yielded
+        # no clips still has groups -- which fail, having no rows.
+        for split in report.splits:
+            for task in split.tasks:
+                key = (split.dataset, split.split, task)
+                groups.setdefault(key, self._new_group(key, split.clips_found))
+
+        for record in records:
+            key = self._key(record)
+            group = groups.setdefault(key, self._new_group(key, None))
+            group["rows"] += 1
+            group["statuses"][record["status"]] += 1
+
+        for key, group in groups.items():
+            group["metric_value"] = self._metric_or_none(
+                metrics.aggregate, group["task"], predicted.get(key, []))
+            group["passed"] = group["rows"] > 0 and group["statuses"]["ok"] == group["rows"]
+
+        return list(groups.values())
+
+    def _new_group(self, key: _GroupKey, clips_found: Optional[int]) -> dict:
+        """A group's entry before any of its rows are counted."""
+        dataset, split, task = key
+        return {
+            # The internal dataset, named as the row records name it. The
+            # records' own `dataset` is the UAD repo, which is not this.
+            "originating_dataset": dataset,
+            "split": split,
+            "task": task,
+            "clips_found": clips_found,
+            "clips_per_split": self.config.clips_per_split,
+            "rows": 0,
+            "statuses": {status: 0 for status in STATUSES},
+            "metric": metrics.metric_name(task),
+            "metric_value": None,
+            "passed": False,
+        }
+
+
+def _check_predictions(predictions: List[Any], requests: List[InferenceRequest]) -> None:
+    """Raise unless the backend gave back one string per request."""
+    if len(predictions) != len(requests):
+        raise ValueError(
+            f"backend returned {len(predictions)} predictions "
+            f"for {len(requests)} requests")
+    # `None` is itself one of the wrong values, so the search can't use it as its
+    # "found nothing" marker.
+    wrong = [p for p in predictions if not isinstance(p, str)][:1]
+    if wrong:
+        raise TypeError(
+            f"backend returned {type(wrong[0]).__name__}, "
+            f"not text: {wrong[0]!r:.60}")

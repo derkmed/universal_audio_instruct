@@ -79,7 +79,7 @@ _WORD_LETTERS = frozenset("ai")
 _MARKED_CHOICE_LETTER = re.compile(r"^[^\w]*([A-Za-z])[ \t]*(?:[^\w\s]|\n|$)")
 
 # Loaded lazily and kept, because `evaluate.load` reads from disk on every call.
-_wer_metric = None
+_wer_metric: Optional[Any] = None
 # Why it would not load, remembered for the rest of this run. The reason and not
 # the exception: re-raising one exception object appends a frame to its
 # traceback every time, and those frames keep each row's locals alive -- audio
@@ -120,12 +120,12 @@ def _same_choice_letter(letter: str, prediction: str) -> bool:
     return bool(letter) and _choice_letter(prediction) == letter
 
 
-def _numbers_of(text: str) -> frozenset:
+def _numbers_of(text: str) -> frozenset[float]:
     """The numbers in `text`, as values, so "1,000" and "1000" are one number."""
     return frozenset(float(found.replace(",", "")) for found in _NUMBER.findall(text))
 
 
-def _numbers_all_appear(numbers: frozenset, prediction: str) -> bool:
+def _numbers_all_appear(numbers: frozenset[float], prediction: str) -> bool:
     """Every number in the answer is one of the prediction's own numbers.
 
     Compared as whole numbers, not as digits inside text, so "1020" does not
@@ -232,7 +232,7 @@ def aggregate(task: str, predicted: Iterable[tuple[dict, str]]) -> Optional[floa
     return sum(hits) / len(hits)
 
 
-def _hit(metric: "_Metric", reading, prediction: str) -> float:
+def _hit(metric: _Metric, reading: Any, prediction: str) -> float:
     """One hit-rate row: 1.0 or 0.0, with the empty-prediction rule written once.
 
     An empty prediction is a real miss, whatever the answer holds. Without this,
