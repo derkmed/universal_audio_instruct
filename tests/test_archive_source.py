@@ -116,7 +116,7 @@ def _load(datasets: dict, config: dict, *, built_n: int = 3, skip: tuple = (),
         fixture["sha256"] = sha256 or {}
         fake = fx._FakeHub(fixture)
         if sha256_error is not None:
-            fake.file_sha256 = _raising(sha256_error)
+            fake.file_sha256s = _raising(sha256_error)
         with fx._patched_hub(fake), _Logs() as logs:
             rows = fx.loader.load_uad_dataset(
                 json_config_path=fixture["config_path"], token=None, **kwargs)
@@ -134,10 +134,10 @@ class Loaded:
         return iter((self.rows, self.fake, self.logs))
 
 
-def _raising(error: Exception) -> Callable[..., str]:
-    def file_sha256(*args: object, **kwargs: object) -> str:
+def _raising(error: Exception) -> Callable[..., dict]:
+    def file_sha256s(*args: object, **kwargs: object) -> dict:
         raise error
-    return file_sha256
+    return file_sha256s
 
 
 def test_a_capped_run_reads_a_fresh_smoke_archive() -> None:
@@ -205,6 +205,17 @@ def test_a_smoke_archive_gives_the_full_archives_clips_for_unrenderable_clips() 
     print("PASS: clips that fail to render count the same in smoke and full-archive runs.")
 
 
+def test_the_staleness_check_is_one_request_for_every_internal_dataset() -> None:
+    rows, fake, logs = _load(CLOTHO_AND_EMNS, CLOTHO_AND_EMNS_CONFIG,
+                             split="all", clips_per_split=1)
+
+    assert fake.sha256_requests == 1, fake.sha256_requests
+    assert sorted(fake.sha256_checks) == ["Clotho.tar.gz", "EMNS.tar.gz"], fake.sha256_checks
+    assert fake.opens == ["smoke/EMNS.tar.gz", "smoke/Clotho.tar.gz"], fake.opens
+
+    print("PASS: one metadata request checks every smoke archive for staleness.")
+
+
 def test_a_cap_above_the_smoke_archives_n_streams_the_full_archive() -> None:
     rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(), built_n=2,
                              split="all", clips_per_split=3)
@@ -260,8 +271,7 @@ def test_a_sha256_check_that_cannot_run_uses_the_smoke_archive_with_a_warning() 
 
 
 def test_a_full_archive_gone_from_the_hub_counts_as_stale() -> None:
-    rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(),
-                             sha256_error=fx.hub.EntryNotFoundError("Clotho.tar.gz is gone"),
+    rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(), sha256={"Clotho.tar.gz": None},
                              split="all", clips_per_split=1)
 
     _streamed_full(fake, logs, "Clotho", level=logging.WARNING)

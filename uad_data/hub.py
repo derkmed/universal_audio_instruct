@@ -99,6 +99,31 @@ def download_prompts_dir(
     return os.path.join(local_repo, "prompts")
 
 
+def file_sha256s(
+    paths_or_urls: list[str],
+    *,
+    repo_id: str = DEFAULT_REPO_ID,
+    revision: str | None = None,
+    token: str | None = None,
+) -> dict[str, str]:
+    """Return repo path -> LFS sha256 at `revision` for each path, in one metadata request.
+
+    Paths that aren't there are left out. Raises ValueError for a path that isn't
+    stored with LFS (only LFS files have a sha256 on the Hub).
+    """
+    rels = [to_repo_path(p) for p in paths_or_urls]
+    infos = HfApi(token=token).get_paths_info(
+        repo_id, rels, revision=revision, repo_type="dataset")
+    shas = {}
+    for info in infos:
+        lfs = getattr(info, "lfs", None)
+        if lfs is None:
+            raise ValueError(
+                f"{info.path} is not an LFS file, so the Hub records no sha256 for it.")
+        shas[info.path] = lfs.sha256
+    return shas
+
+
 def file_sha256(
     path_or_url: str,
     *,
@@ -106,20 +131,16 @@ def file_sha256(
     revision: str | None = None,
     token: str | None = None,
 ) -> str:
-    """Return a repo file's LFS sha256 at `revision`, with one small metadata request.
+    """Return one repo file's LFS sha256 at `revision`.
 
     Raises `EntryNotFoundError` when the file isn't there, and ValueError when it
-    isn't stored with LFS (only LFS files have a sha256 on the Hub).
+    isn't stored with LFS.
     """
     rel = to_repo_path(path_or_url)
-    infos = HfApi(token=token).get_paths_info(
-        repo_id, [rel], revision=revision, repo_type="dataset")
-    if not infos:
+    shas = file_sha256s([rel], repo_id=repo_id, revision=revision, token=token)
+    if rel not in shas:
         raise EntryNotFoundError(f"{rel} is not in {repo_id} at {revision or 'main'}.")
-    lfs = getattr(infos[0], "lfs", None)
-    if lfs is None:
-        raise ValueError(f"{rel} is not an LFS file, so the Hub records no sha256 for it.")
-    return lfs.sha256
+    return shas[rel]
 
 
 def current_commit(
