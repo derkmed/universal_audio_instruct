@@ -17,7 +17,7 @@ class ClipQuota:
     lists has been read (with no cap, only the latter).
     """
 
-    def __init__(self, split_paths: dict[str, Iterable[str]], clips_per_split: int | None):
+    def __init__(self, split_paths: dict[str, Iterable[str]], clips_per_split: int | None) -> None:
         self._cap = clips_per_split
         self._unread = {split: set(paths) for split, paths in split_paths.items()}
         self._found = dict.fromkeys(split_paths, 0)

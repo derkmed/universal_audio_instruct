@@ -15,6 +15,8 @@ import hashlib
 import logging
 import os
 import sys
+from dataclasses import dataclass
+from typing import Callable, Iterator
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -69,7 +71,7 @@ def _add_smoke(root: str, fixture: dict, datasets: dict, n: int, skip: tuple) ->
 class _Logs(logging.Handler):
     """Collects the loader's log lines at INFO and above."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(logging.INFO)
         self.records: list[logging.LogRecord] = []
 
@@ -79,14 +81,14 @@ class _Logs(logging.Handler):
     def lines(self, level: int = logging.INFO) -> list[str]:
         return [r.getMessage() for r in self.records if r.levelno >= level]
 
-    def __enter__(self):
+    def __enter__(self) -> "_Logs":
         logger = logging.getLogger(fx.loader.__name__)
         self._level = logger.level
         logger.setLevel(logging.INFO)
         logger.addHandler(self)
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> None:
         logger = logging.getLogger(fx.loader.__name__)
         logger.removeHandler(self)
         logger.setLevel(self._level)
@@ -94,8 +96,8 @@ class _Logs(logging.Handler):
 
 def _load(datasets: dict, config: dict, *, built_n: int = 3, skip: tuple = (),
           manifest: bool = True, truncate: dict | None = None, sha256: dict | None = None,
-          sha256_error: Exception | None = None, **kwargs):
-    """Load with smoke archives on the fake Hub; return rows, the fake and the log lines."""
+          sha256_error: Exception | None = None, **kwargs: object) -> "Loaded":
+    """Load with smoke archives on the fake Hub; return the rows, the fake and the log lines."""
     with fx.tempfile.TemporaryDirectory() as root:
         fixture = fx._build_fixture(root, datasets, config)
         for base, fraction in (truncate or {}).items():
@@ -110,11 +112,22 @@ def _load(datasets: dict, config: dict, *, built_n: int = 3, skip: tuple = (),
         with fx._patched_hub(fake), _Logs() as logs:
             rows = fx.loader.load_uad_dataset(
                 json_config_path=fixture["config_path"], token=None, **kwargs)
-    return rows, fake, logs
+    return Loaded(rows, fake, logs)
 
 
-def _raising(error: Exception):
-    def file_sha256(*args, **kwargs):
+@dataclass
+class Loaded:
+    """What `_load` gives back. Unpacks as `rows, fake, logs`."""
+    rows: list[dict]
+    fake: fx._FakeHub
+    logs: _Logs
+
+    def __iter__(self) -> Iterator[object]:
+        return iter((self.rows, self.fake, self.logs))
+
+
+def _raising(error: Exception) -> Callable[..., str]:
+    def file_sha256(*args: object, **kwargs: object) -> str:
         raise error
     return file_sha256
 
@@ -135,7 +148,8 @@ def test_a_capped_run_reads_a_fresh_smoke_archive() -> None:
     print("PASS: a capped run reads a fresh smoke archive and gets the full archive's rows.")
 
 
-def _streamed_full(fake, logs, dataset: str, level: int = logging.INFO) -> None:
+def _streamed_full(fake: fx._FakeHub, logs: _Logs, dataset: str,
+                   level: int = logging.INFO) -> None:
     assert fake.opens == [f"{dataset}.tar.gz"], fake.opens
     assert f"{dataset}.tar.gz" in fake.reads, "the full archive was not streamed"
     assert any(dataset in line and "full archive" in line for line in logs.lines(level)), \
@@ -194,6 +208,38 @@ def test_a_sha256_check_that_cannot_run_uses_the_smoke_archive_with_a_warning() 
     assert len(fx._clips(rows)) == 3, fx._clips(rows)
 
     print("PASS: when the sha256 check can't run, the smoke archive is used with a warning.")
+
+
+def test_a_full_archive_gone_from_the_hub_counts_as_stale() -> None:
+    rows, fake, logs = _load(fx.CLOTHO, fx._clotho_config(),
+                             sha256_error=fx.hub.EntryNotFoundError("Clotho.tar.gz is gone"),
+                             split="all", clips_per_split=1)
+
+    _streamed_full(fake, logs, "Clotho", level=logging.WARNING)
+
+    print("PASS: a full archive missing from the Hub makes its smoke archive stale.")
+
+
+def test_a_manifest_that_cannot_be_fetched_warns() -> None:
+    with fx.tempfile.TemporaryDirectory() as root:
+        fixture = fx._build_fixture(root, fx.CLOTHO, fx._clotho_config())
+        fake = fx._FakeHub(fixture)
+        serve = fake.download_file
+
+        def download_file(path_or_url: str, **kwargs: object) -> str:
+            if path_or_url == "smoke/manifest.json":
+                raise OSError("connection reset")
+            return serve(path_or_url, **kwargs)
+
+        fake.download_file = download_file
+        with fx._patched_hub(fake), _Logs() as logs:
+            fx.loader.load_uad_dataset(json_config_path=fixture["config_path"], token=None,
+                                       split="all", clips_per_split=1)
+
+    assert any("connection reset" in line for line in logs.lines(logging.WARNING)), logs.lines()
+    assert fake.opens == ["Clotho.tar.gz"], fake.opens
+
+    print("PASS: a manifest that can't be fetched logs a warning and streams full archives.")
 
 
 def test_a_row_filter_other_than_all_pass_streams_the_full_archive() -> None:
