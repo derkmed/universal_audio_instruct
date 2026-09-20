@@ -12,7 +12,6 @@ local snapshot path (the plain-data replacement for the old loading script's
 `_ensure_hub_resources` shim).
 """
 import functools
-import glob
 import itertools
 import json
 import random
@@ -110,8 +109,3 @@ class PromptFilepath:
 
     def accepts_task(self, task: tasks_lib.Task) -> bool:
         return self.data[TASK_COLUMN] == task.value
-
-
-if __name__ == "__main__":
-    prompt_files = glob.glob(f'{PROMPTS_DIR}/*')
-    print(prompt_files)

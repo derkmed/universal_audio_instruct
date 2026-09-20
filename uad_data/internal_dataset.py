@@ -1,6 +1,6 @@
 """Configuration of Internal Datasets contained by Universal Audio Understanding Dataset."""
 import datasets
-from typing import Dict, List
+from typing import List
 
 from .tasks import Task
 
@@ -19,25 +19,18 @@ class InternalDataset:
             tasks: list[Task] | Task,
             splits: list[datasets.Split] | datasets.Split,
             description: str = '',
-            version: datasets.Version | None = datasets.Version("1.0.0"),
             data_url: str | None = None,
-            lfs_mode: bool = True
         ):
         super().__init__()
         self.name = name
         self.description = description
-        self.version = version
         self.set_tasks(tasks)
         self.set_splits(splits)
         self.repo_url = REPO_URL
-        self.lfs_mode = lfs_mode
-        self.data_url = (
-            data_url if data_url else
-            TAR_GZ_FILEPATH.format(name=self.name)
-        )
-        if self.lfs_mode:
-            # Prepend with the Repo URL if the file is a git-lfs file.
-            self.data_url = self.get_git_lfs_path(self.data_url)
+        # Every archive is an LFS file under the repo, so the path is always
+        # absolutised here; `hub.to_repo_path` turns it back into a repo path.
+        self.data_url = self.get_git_lfs_path(
+            data_url if data_url else TAR_GZ_FILEPATH.format(name=self.name))
 
     def get_git_lfs_path(self, metadata_path: str) -> str:
         return f'{self.repo_url}/{metadata_path}'
@@ -65,26 +58,9 @@ class InternalDataset:
     def set_splits(self, splits: list[datasets.Split] | datasets.Split) -> None:
         self._splits = [splits] if not isinstance(splits, List) else splits
 
-    @property
-    def features(self) -> Dict[str, datasets.Value]:
-        _features = {
-            "originating_dataset": datasets.Value("string"),
-            "task": datasets.Value("string"),
-            "audio_path": datasets.Value("string"),
-            "audio": datasets.Audio(sampling_rate=8_000, decode=False),
-            "system_instruction": datasets.Value("string"),
-            "prompt": datasets.Value("string"),
-            "output": datasets.Value("string"),
-            "split": datasets.Value("string"),
-        }
-        for task in self.tasks:
-            _features.update(task.features)
-        return _features
-
     def __repr__(self) -> str:
         repr_text = ''
         repr_text += f'name: "{self.name}"'
-        repr_text += f', version: "{str(self.version)}"'
         repr_text += f', tasks: {self._tasks}'
         repr_text += f', splits: {self._splits}'
         repr_text += f', description: "{self.description}"'

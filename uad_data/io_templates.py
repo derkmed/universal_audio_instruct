@@ -12,7 +12,6 @@ from the `system_instructions` / `prompts` / `outputs` arrays in a
 import abc
 import dataclasses
 import jinja2
-import re
 
 from . import tasks as tasks_lib
 
@@ -27,13 +26,6 @@ class Template(abc.ABC):
     def make(self, context: dict[str, str]) -> str:
         template = jinja2.Template(self.template)
         return template.render(context)
-
-    def get_expected_kwargs(self):
-        kwargs = {}
-        matches = re.findall(r"\{(\w+)\}", self.template)
-        for match in matches:
-            kwargs[match] = None
-        return kwargs
 
 
 @dataclasses.dataclass(kw_only=True, frozen=True)

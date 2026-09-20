@@ -2,6 +2,13 @@
 
 Research for [#3](https://github.com/derkmed/universal_audio_instruct/issues/3), part of the map [#1 Smoke runs across every UAD dataset](https://github.com/derkmed/universal_audio_instruct/issues/1). Checked on 2026-09-16 against `main` at `8f0b6f9`.
 
+> **Naming note.** This document predates the `Sample` → `Row` rename
+> ([ADR-0002](../adr/0002-row-not-example.md)) and uses the names the code had at
+> the commit it was run against: `Sample`, `Sample.to_output`, `iter_samples`,
+> `sample_filter`, `sample.py`. Today those are `Row`, `Row.to_output`,
+> `_iter_rows`, `row_filter` and `row.py`. The text is kept as written so it
+> still describes the run it reports.
+
 > **Caveat: local copy.** Every data finding here comes from a **local copy** of the private Hub repo (`C:\Users\derek\Desktop\UAD-DEV\Universal-Audio-Understanding\`), not from the Hub itself. `huggingface_hub` downloaded that copy between 11:53 and 12:22 UTC on 2026-07-08, from Hub commit **`09f8a0f303ede57828b07886993c5490f29cbf09`**. Every in-scope file still matches that snapshot (see [Local copy vs the Hub](#local-copy-vs-the-hub)). So the findings hold for that commit. Whether the Hub has changed since was **not** checked, because this research didn't touch the network. Before acting on the fixes below, check the four affected files against the Hub.
 
 ## Answer

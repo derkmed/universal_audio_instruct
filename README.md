@@ -16,8 +16,17 @@ uad_data/     # shared dataset library: load_uad_dataset() downloads + expands r
 eval/         # evaluation harness (batched inference + metrics)   -> python -m eval.main
 train/        # QLoRA finetuning via HF Trainer                     -> python -m train.main
 configs/      # dataset run configs (which datasets/tasks/splits)   e.g. clotho_config.json
-tests/        # offline tests
+tests/        # offline tests (no network; ~18s)
+docs/
+  adr/        # the decisions behind the design, and why the alternatives lost
+  specs/      # settled plans, built or being built
+  research/   # dated findings against a pinned commit; not kept up to date
+  agents/     # how agent skills should read this repo
 ```
+
+Start with [`CONTEXT.md`](./CONTEXT.md) for the vocabulary (clip vs row vs
+utterance, smoke run vs regular run) and [`docs/adr/`](./docs/adr) for why things
+are the way they are.
 
 Both `eval/` and `train/` consume the same `uad_data` loader, so evaluation and
 training see identical rows.
@@ -30,6 +39,7 @@ flowchart LR
         DATA["data/&lt;name&gt;/&lt;name&gt;.tar.gz<br/>+ per-split metadata JSON"]
         PROMPTS["prompts/*.json<br/>(jinja2 templates)"]
         CONFIGS["universal_audio_dataset_configs/"]
+        SMOKE["smoke/&lt;name&gt;.tar.gz<br/>+ manifest.json<br/>(first N clips per split)"]
     end
 
     subgraph REPO["this repo (code)"]
@@ -38,7 +48,8 @@ flowchart LR
         TRAIN["train/<br/>python -m train.main"]
     end
 
-    DATA -- "hf_hub_download,<br/>or lazy stream when clips_per_split" --> UAD
+    DATA -- "regular run: hf_hub_download<br/>smoke fallback: lazy HTTP stream" --> UAD
+    SMOKE -- "smoke run: small download,<br/>when fresh + all_pass filter" --> UAD
     PROMPTS --> UAD
     CONFIGS --> UAD
     UAD -- "rows: audio bytes +<br/>system_instruction / prompt / output" --> EVAL
@@ -94,6 +105,34 @@ HF `Trainer`-based, one training backend per model (Gemma, Qwen3-Omni)
 mirroring the eval backends. Three modes: QLoRA (default), LoRA on a bf16 base
 (`--no-4bit`), full finetune (`--no-4bit --no-lora`). **Full guide:
 [`FINETUNING.md`](./FINETUNING.md).**
+
+## Keeping the Hub in step (operator commands)
+
+Two commands in `uad_data` produce files that live on the Hub. Neither runs
+during a normal evaluation or training run; rerun them when the dataset changes
+and upload the results.
+
+```bash
+# Smoke archives: the first N clips of each split of each internal dataset in a
+# run config, so a smoke run downloads megabytes rather than gigabytes.
+# Writes <output-dir>/<name>.tar.gz plus manifest.json; upload them to smoke/.
+python -m uad_data.build_smoke_archives --clips-per-split 10
+
+# complete.json: the five complete-1..5 run configs combined into one.
+# complete-1..5 stay the source of truth; upload the output to
+# universal_audio_dataset_configs/complete.json.
+python -m uad_data.build_complete_config --output outputs/complete.json
+```
+
+Rerun `build_smoke_archives` whenever an internal dataset's archive or a split's
+metadata JSON changes. Forgetting is safe but slow: the loader compares the
+manifest's recorded versions against the Hub's current ones and falls back to
+streaming the full archive when they differ. See
+[ADR-0004](./docs/adr/0004-smoke-archives-and-staleness.md).
+
+> **Current state (2026-09-20):** `smoke/` on the Hub is empty and
+> `complete.json` has not been uploaded, so every smoke run takes the streaming
+> fallback. The code path is built and tested; the data is not yet published.
 
 ## Onboarding a new internal dataset
 

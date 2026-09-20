@@ -4,6 +4,11 @@ Research for [#2](https://github.com/derkmed/universal_audio_instruct/issues/2),
 
 Scope: every (internal dataset, split) listed in the run configs `complete-1.json` to `complete-5.json`. That is 23 internal datasets and 41 splits.
 
+> **Naming note.** This document predates the `Sample` → `Row` rename
+> ([ADR-0002](../adr/0002-row-not-example.md)) and uses the names the code had
+> when it was written, such as `iter_samples` (now `_iter_rows`). The text is
+> kept as written so it still describes the run it reports.
+
 ## Answer
 
 - **Cheap (30 of 41 splits).** In archive order, the 20th clip appears within the first 37 MiB of compressed data. For 22 of these splits, it appears within the first 11 MiB. Reaching 20 clips in all 30 of these splits takes about 336 MiB of compressed data in total.

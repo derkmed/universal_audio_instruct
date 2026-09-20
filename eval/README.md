@@ -23,7 +23,7 @@ flowchart TD
     subgraph BATCH["per batch (batches run one after another)"]
         PRE["preprocess_audio (uad_data.audio_utils)<br/>decode → 16 kHz mono float32, thread pool<br/>(Gemma uses it; Qwen reads the raw bytes)"]
         REQ["InferenceRequest batch<br/>(audio + sys_inst + prompt + ground truth)"]
-        GEN["backend.generate_batch<br/>(one batched generate call; falls back to sequential)"]
+        GEN["backend.generate_batch<br/>(one batched generate call)"]
         PRE --> REQ --> GEN
     end
 
@@ -44,6 +44,21 @@ flowchart TD
 | `backends/base.py` | `ModelBackend` ABC + `InferenceRequest` |
 | `backends/gemma.py` | Gemma: audio arrays in chat messages, batched `processor(text, audio)` |
 | `backends/qwen.py` | Qwen3-Omni: raw audio bytes in temp files + `process_mm_info`, batched processing |
+
+## When a batch fails
+
+Two layers catch a failing batch, and they predate each other:
+
+- **Inside each backend**, `generate_batch` catches any exception and retries the
+  batch one row at a time, printing one line. This was written before the
+  evaluator had a policy of its own.
+- **In `Evaluator._predict`**, a backend that raises, returns the wrong number of
+  predictions, or returns anything other than text is one failure: the batch gets
+  `model_error` in a smoke run, and a regular run re-raises.
+
+Because the backend layer runs underneath, a genuine fault such as a CUDA OOM
+currently becomes a silent 4×-slower run rather than a recorded `model_error`.
+Collapsing the two into the evaluator's policy is an open improvement.
 
 To evaluate a finetuned checkpoint, merge the LoRA adapter and pass it via
 `--model-path` — see [`FINETUNING.md`](../FINETUNING.md#evaluating-a-finetuned-model).
