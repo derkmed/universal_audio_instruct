@@ -82,3 +82,21 @@ _Avoid_: score, accuracy
 **Answer field**:
 The plain metadata field a task's preliminary metric reads a row against — a caption's `caption`, a qa row's `answer` — as opposed to the rendered `output`, which wraps that answer in template prose. Which rows a group's metric covers is decided by row status alone: every row with a prediction. An answer field its rule reads as nothing is judged by that rule like any other, not excluded — a `commonsense_answer` with no choice letter has none to be started with, so the row misses.
 _Avoid_: reference (a WER reference is one answer field, not all of them), label
+
+## Finetune runs on GCP
+
+**Run prefix**:
+The single GCS location that holds everything for one finetune run: `gs://<bucket>/finetunes/<model>/<run-id>/`, containing `checkpoints/`, `final/`, `run_config.json` and `train_log.jsonl`.
+_Avoid_: run directory, output dir (the output dir is the VM's local disk, not GCS)
+
+**Run-id**:
+The identifier for one finetune run: a UTC timestamp plus a short git SHA. Minted on the first launch when `--run-id` is omitted, and passed back with `--run-id` to resume the same run on a fresh VM. It is the operator's contract — a fresh VM resumes a run only when handed that run-id; there is no auto-discovery, and runs for the same model may be in flight concurrently.
+_Avoid_: job id, session id
+
+**Checkpoint marker**:
+An empty `_COMPLETE` object written into a remote `checkpoint-<step>/` only after every file in that checkpoint has finished uploading. A remote checkpoint counts as resumable only if its marker is present; a partially-uploaded checkpoint has no marker and is ignored on resume. Remote checkpoints are pruned to the newest 2 marked ones, marker deleted first.
+_Avoid_: done flag, sentinel
+
+**Final artifacts**:
+What a completed run leaves at `<run prefix>/final/` for `eval.main` to load: `final/adapter/` (always, the trained LoRA adapter) and `final/merged/` (only for Gemma, and only when `--merge` was passed). Their presence is not a resume signal — resume is driven by `--run-id` alone.
+_Avoid_: output, results
