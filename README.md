@@ -74,6 +74,9 @@ python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json --s
 
 Or use the Colab notebook: [`eval/colab_eval.ipynb`](./eval/colab_eval.ipynb).
 
+To preview a cheap **smoke slice** of the dataset on a CPU-only machine (no GPU,
+no upload), see [`docs/smoke-run-demo.md`](./docs/smoke-run-demo.md).
+
 ## Loading the dataset directly
 
 ```python
