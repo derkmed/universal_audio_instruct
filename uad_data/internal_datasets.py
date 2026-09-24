@@ -219,7 +219,14 @@ DATASETS = [
         description=(
             'Speech Dataset from "A Spoken Language Understanding Resource Package"\nLicense: CC BY-NC 4.0\nhttps://github.com/pswietojanski/slurp/tree/master'
         ),
-        tasks=[Task.CLASSIFICATION, Task.INTENT_DETECTION, Task.INTENT_DETECTION_NL, Task.ACTION_CLASSIFICATION, Task.ASR],
+        # Intent detection is `classification` here: the metadata's `category`
+        # column is a copy of `intent` (the Hub's
+        # report_scripts/add_classification_category_to_slurp_real.py made it),
+        # so a separate intent_detection task would render the same label twice.
+        # `action` is a second classification axis, and one dataset carries only
+        # one: `category`/`categories`. It stays an unused metadata column, as
+        # MELD's `Sentiment` does. See docs/adr/0008-one-classification-axis.md.
+        tasks=[Task.CLASSIFICATION, Task.INTENT_DETECTION_NL, Task.ASR],
         splits=[datasets.Split.TRAIN, datasets.Split.VALIDATION, datasets.Split.TEST],
         data_url='data/slurp_real/slurp_real.tar.gz'
     ),

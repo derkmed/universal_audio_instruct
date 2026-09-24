@@ -1,0 +1,74 @@
+{
+  "asr": {
+    "file": "asr.json",
+    "placeholders": [
+      "transcription"
+    ]
+  },
+  "asr_timestamp_search": {
+    "file": "asr_timestamp_search.json",
+    "placeholders": [
+      "end_time",
+      "start_time",
+      "transcription"
+    ]
+  },
+  "caption": {
+    "file": "caption.json",
+    "placeholders": [
+      "caption"
+    ]
+  },
+  "classification": {
+    "file": "classification.json",
+    "placeholders": [
+      "categories",
+      "category"
+    ]
+  },
+  "commonsense": {
+    "file": "commonsense.json",
+    "placeholders": [
+      "commonsense_answer",
+      "commonsense_choices"
+    ]
+  },
+  "commonsense_hard": {
+    "file": "commonsense_hard.json",
+    "placeholders": [
+      "hard_commonsense_answer",
+      "hard_commonsense_choices"
+    ]
+  },
+  "english_translation": {
+    "file": "english_translation.json",
+    "placeholders": [
+      "english_translation"
+    ]
+  },
+  "intent_detection_nl": {
+    "file": "intent_detection_nl.json",
+    "placeholders": [
+      "intent_nl"
+    ]
+  },
+  "intonation_detection": {
+    "file": "intonation_detection.json",
+    "placeholders": [
+      "category"
+    ]
+  },
+  "qa": {
+    "file": "qa.json",
+    "placeholders": [
+      "answer",
+      "question"
+    ]
+  },
+  "sentiment_analysis": {
+    "file": "sentiment_analysis.json",
+    "placeholders": [
+      "Sentiment"
+    ]
+  }
+}

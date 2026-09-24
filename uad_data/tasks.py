@@ -16,17 +16,20 @@ class Task(enum.Enum):
     ASR = "asr"
     ASR_TIMESTAMP_SEARCH = "asr_timestamp_search"
     CLASSIFICATION = "classification"
-    # Classification tasks should be suffixed with 'classification'.
-    SENTIMENT_ANALYSIS = "sentiment_analysis"
     CAPTION = "caption"
     COMMONSENSE = "commonsense"
     COMMONSENSE_HARD = "commonsense_hard"
     QA = "qa"
     ENGLISH_TRANSLATION = "english_translation"
-    INTONATION_DETECTION = "intonation_detection"
-    INTENT_DETECTION = "intent_detection"
     INTENT_DETECTION_NL = "intent_detection_nl"
-    ACTION_CLASSIFICATION = "action_classification"
+    # Kept only because `prompts/` still holds a file naming each one, and
+    # `_get_prompt_templates` builds a `PromptFilepath` for every file it globs:
+    # dropping the member would make `Task(...)` raise on that file and take
+    # every other task's lookup down with it. No dataset registers either --
+    # what they label is `classification` now (ADR-0008), so MELD's emotions and
+    # MLEnd_Intonation's intonations both arrive as `category`/`categories`.
+    SENTIMENT_ANALYSIS = "sentiment_analysis"
+    INTONATION_DETECTION = "intonation_detection"
 
     @property
     def features(self) -> dict[str, Any]:
@@ -72,10 +75,6 @@ class Task(enum.Enum):
             return {"english_translation": datasets.Value("string")}
         elif self == Task.INTENT_DETECTION_NL:
             return {"intent_nl": datasets.Value("string")}
-        elif self == Task.INTENT_DETECTION:
-            return {"intent": datasets.Value("string")}
-        elif self == Task.ACTION_CLASSIFICATION:
-            return {"action": datasets.Value("string")}
         elif self == Task.INTONATION_DETECTION:
             return {"category": datasets.Value("string")}
         else:
