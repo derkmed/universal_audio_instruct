@@ -1,0 +1,28 @@
+# Makes the repo installable (`pip install -e .`) so `uad_data`, `eval`, `train`
+# and `models` import from anywhere -- no per-file sys.path inserts in tests, and
+# no cwd dependence in CI.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "universal-audio-instruct"
+version = "0.1.0"
+description = "Dataset library and eval/train harnesses for Universal Audio Understanding."
+requires-python = ">=3.10"
+# Runtime deps stay in requirements.txt / train/requirements.txt: CI installs
+# CPU-only torch from the PyTorch wheel index first, which a dependency list
+# here would undo.
+dependencies = []
+
+[tool.setuptools]
+# `eval` shadows the builtin, but it is how `python -m eval.main` already runs;
+# renaming it is a separate change.
+packages = [
+    "uad_data",
+    "eval",
+    "eval.backends",
+    "train",
+    "train.backends",
+]
+py-modules = ["models"]

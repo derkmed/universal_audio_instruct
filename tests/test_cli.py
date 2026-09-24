@@ -8,16 +8,10 @@ and resolve an unset `dataset_split`.
 Runnable directly (`python tests/test_cli.py`) or under pytest. Needs all of
 `requirements.txt` (CPU `torch` is enough): both `main` modules import it.
 """
-import os
-import sys
-
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from eval import main as eval_main  # noqa: E402
-from eval.config import EvalConfig  # noqa: E402
-from train import main as train_main  # noqa: E402
-from train.config import TrainConfig  # noqa: E402
+from eval import main as eval_main
+from eval.config import EvalConfig
+from train import main as train_main
+from train.config import TrainConfig
 
 PARSERS = {"eval": eval_main.build_parser, "train": train_main.build_parser}
 

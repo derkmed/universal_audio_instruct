@@ -13,17 +13,13 @@ Only requires `datasets`, `jinja2`, `huggingface_hub` -- not the heavy eval deps
 """
 import json
 import os
-import sys
 import tempfile
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import datasets
 
-import datasets  # noqa: E402
-
-from uad_data import filters, internal_datasets  # noqa: E402
-from uad_data.json_config_loader import UniversalJsonConfig  # noqa: E402
-from uad_data.tasks import Task  # noqa: E402
+from uad_data import filters, internal_datasets
+from uad_data.json_config_loader import UniversalJsonConfig
+from uad_data.tasks import Task
 
 # Narrows Clotho to one task and one split, like the Hub's complete-1.json.
 NARROW_CONFIG = {

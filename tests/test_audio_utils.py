@@ -8,16 +8,11 @@ Runnable directly (`python tests/test_audio_utils.py`) or under pytest. Requires
 `numpy`, `soundfile` and `librosa`.
 """
 import io
-import os
-import sys
 
 import numpy as np
 import soundfile as sf
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data.audio_utils import preprocess_audio  # noqa: E402
+from uad_data.audio_utils import preprocess_audio
 
 
 def _wav_bytes(seconds: float, sr: int, channels: int = 1) -> bytes:

@@ -8,9 +8,10 @@ flags.
 from dataclasses import dataclass, field
 from typing import Optional
 
-# Same model registry as eval so --model means the same thing in both harnesses.
-from eval.config import (
-    DEFAULT_MODEL_PATHS, DEFAULT_SEED, resolve_dataset_split, validate_clips_per_split)
+# The same shared homes eval reads, so --model and --split mean the same thing
+# in both harnesses without either importing the other.
+import models
+from uad_data import run_options
 
 
 @dataclass
@@ -27,7 +28,7 @@ class TrainConfig:
     clips_per_split: Optional[int] = None  # first N clips of each selected split; None = every clip
 
     # Model
-    model_path: Optional[str] = None  # overrides DEFAULT_MODEL_PATHS if set
+    model_path: Optional[str] = None  # overrides models.DEFAULT_MODEL_PATHS if set
 
     # Audio preprocessing for Gemma (must match eval so train/eval see identical
     # inputs). The Qwen backend reads raw audio bytes and ignores these.
@@ -59,7 +60,7 @@ class TrainConfig:
     logging_steps: int = 10
     save_steps: int = 200
     gradient_checkpointing: bool = True
-    seed: int = DEFAULT_SEED  # seeds the Trainer and the loader's prompt-template picks
+    seed: int = run_options.DEFAULT_SEED  # seeds the Trainer and the loader's prompt-template picks
 
     # Auth
     hf_token: Optional[str] = None
@@ -70,8 +71,8 @@ class TrainConfig:
         return self.clips_per_split is not None
 
     def __post_init__(self):
-        validate_clips_per_split(self.clips_per_split)
-        self.dataset_split = resolve_dataset_split(
+        run_options.validate_clips_per_split(self.clips_per_split)
+        self.dataset_split = run_options.resolve_dataset_split(
             self.dataset_split, clips_per_split=self.clips_per_split, uncapped_default="train")
         if self.load_in_4bit and not self.use_lora:
             raise ValueError(
@@ -81,11 +82,4 @@ class TrainConfig:
 
     @property
     def resolved_model_path(self) -> str:
-        if self.model_path:
-            return self.model_path
-        if self.model_choice not in DEFAULT_MODEL_PATHS:
-            raise ValueError(
-                f"Unknown model_choice '{self.model_choice}'. "
-                f"Either set model_path or use one of: {list(DEFAULT_MODEL_PATHS)}"
-            )
-        return DEFAULT_MODEL_PATHS[self.model_choice]
+        return models.resolve_model_path(self.model_choice, self.model_path)

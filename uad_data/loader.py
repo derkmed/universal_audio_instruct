@@ -56,6 +56,7 @@ from .internal_dataset import InternalDataset
 from .json_config_loader import UniversalJsonConfig
 from .load_report import LoadedRows, LoadFailure, LoadReport, RenderFailure, SplitReport
 from .row import Row
+from .run_options import validate_clips_per_split
 from .tasks import Task
 
 logger = logging.getLogger(__name__)
@@ -649,8 +650,7 @@ def load_uad_dataset(
         The row dicts, consumable directly by the Evaluator, as a list whose
         `report` is the load report (see `uad_data.load_report`).
     """
-    if clips_per_split is not None and clips_per_split < 1:
-        raise ValueError(f"clips_per_split must be a positive integer, got {clips_per_split}.")
+    validate_clips_per_split(clips_per_split)
 
     config_path = _resolve_config_path(
         json_config_path, repo_id=repo_id, revision=revision, token=token)

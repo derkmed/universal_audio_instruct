@@ -38,7 +38,7 @@ flowchart TD
 | file | role |
 | --- | --- |
 | `main.py` | CLI entry point; wires config → loader → backend → evaluator, and turns a smoke run's result into its exit status |
-| `config.py` | `EvalConfig` + `DEFAULT_MODEL_PATHS` (registry shared with `train/`) |
+| `config.py` | `EvalConfig`; the model registry lives in top-level `models.py` and the dataset-slice helpers in `uad_data/run_options.py`, both shared with `train/` |
 | `evaluator.py` | batch loop: threaded audio decoding, then one batched generate call per batch; incremental `results.jsonl`; a status for every row, then per-group pass/fail and metrics |
 | `metrics.py` | the one preliminary metric each task reports, and the rule behind it; the module docstring holds the table |
 | `backends/base.py` | `ModelBackend` ABC + `InferenceRequest` |

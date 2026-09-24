@@ -7,13 +7,7 @@ rows have 100 each of `category` Angry, Happy, Neutral and Sad, and every row's
 Runnable directly (`python tests/test_urdu_description.py`) or under pytest.
 Only requires `datasets`.
 """
-import os
-import sys
-
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data.internal_datasets import DATASETS_DIRECTORY  # noqa: E402
+from uad_data.internal_datasets import DATASETS_DIRECTORY
 
 URDU_CLASSES = "Angry, Happy, Neutral, and Sad"
 

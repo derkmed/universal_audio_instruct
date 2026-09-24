@@ -14,19 +14,15 @@ import hashlib
 import io
 import json
 import os
-import sys
 import tarfile
 import tempfile
 from typing import Callable, TypeVar
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import test_loader_splits as fx
 
-import test_loader_splits as fx  # noqa: E402
+from huggingface_hub.hf_api import RepoFile
 
-from huggingface_hub.hf_api import RepoFile  # noqa: E402
-
-from uad_data import build_smoke_archives, hub, internal_datasets, smoke  # noqa: E402
+from uad_data import build_smoke_archives, hub, internal_datasets, smoke
 
 T = TypeVar("T")
 

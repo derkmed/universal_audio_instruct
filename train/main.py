@@ -19,9 +19,11 @@ import os
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
 
+import models
 from uad_data import load_uad_dataset
+from uad_data import run_options
 from .backends import GemmaTrainBackend, QwenTrainBackend
-from .config import DEFAULT_MODEL_PATHS, DEFAULT_SEED, TrainConfig
+from .config import TrainConfig
 
 
 class RowDataset(Dataset):
@@ -40,7 +42,7 @@ class RowDataset(Dataset):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Audio Instruct Finetuning (QLoRA + HF Trainer)")
 
-    p.add_argument("--model", required=True, choices=list(DEFAULT_MODEL_PATHS),
+    p.add_argument("--model", required=True, choices=list(models.DEFAULT_MODEL_PATHS),
                    dest="model_choice", help="Which model backend to finetune")
     p.add_argument("--model-path", default=None,
                    help="Override the default HuggingFace model path/id")
@@ -54,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="UAD dataset JSON config (default: configs/clotho_config.json)")
     p.add_argument("--clips-per-split", type=int, default=None, dest="clips_per_split",
                    help="Train on only the first N clips of each selected split (for smoke runs)")
-    p.add_argument("--seed", type=int, default=DEFAULT_SEED, dest="seed",
+    p.add_argument("--seed", type=int, default=run_options.DEFAULT_SEED, dest="seed",
                    help="Seeds the Trainer and the prompt-template picks")
 
     p.add_argument("--output-dir", default="outputs/finetune", dest="output_dir")
