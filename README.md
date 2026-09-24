@@ -67,7 +67,7 @@ utterance: `(task × utterance × prompt-template)`.
 ## Quickstart (evaluation)
 
 ```bash
-pip install -r requirements.txt
+pip install -e . -r requirements.txt
 export HF_TOKEN=...            # dataset + gated models are private
 python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json --split test
 ```
@@ -100,7 +100,7 @@ rows = load_uad_dataset(
 ## Finetuning
 
 ```bash
-pip install -r requirements.txt -r train/requirements.txt
+pip install -e . -r requirements.txt -r train/requirements.txt
 python -m train.main --model GEMMA-4 --json-config configs/clotho_config.json --split train
 ```
 
@@ -208,5 +208,5 @@ For a dataset called `MyDataset`:
 ## Tests
 
 ```bash
-python -m pytest tests    # offline; needs pytest, datasets, jinja2, huggingface_hub
+python -m pytest tests    # offline; needs the editable install above, plus pytest
 ```

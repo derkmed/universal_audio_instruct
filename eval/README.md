@@ -5,7 +5,7 @@ Universal Audio Understanding dataset. Rows come from the shared
 [`uad_data`](../uad_data) loader — the same rows [`train/`](../train) finetunes on.
 
 ```bash
-pip install -r requirements.txt
+pip install -e . -r requirements.txt
 export HF_TOKEN=...   # private dataset; some models are gated
 python -m eval.main --model GEMMA-4 --json-config configs/clotho_config.json --split test
 ```
