@@ -11,6 +11,11 @@ on:
     branches: [main]
   pull_request:
 
+# The suite only reads the checkout. Stated explicitly so a change to the repo or
+# org default token scope cannot silently widen it.
+permissions:
+  contents: read
+
 jobs:
   pytest:
     runs-on: ubuntu-latest
