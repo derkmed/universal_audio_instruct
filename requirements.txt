@@ -1,4 +1,8 @@
 torch
+# torchvision is not imported by this repo, but qwen-omni-utils imports it at
+# module level, so any run that touches the Qwen backend needs it. Kept bare, as
+# torch is, so the CPU wheel installed first is not re-resolved.
+torchvision
 transformers>=5.5.0  # Gemma 4 arrived in 5.5.0 (Qwen3-Omni alone needs >=4.57.0)
 datasets==3.6.0
 huggingface_hub

@@ -1,8 +1,9 @@
-# The offline suite (166 tests, well under a minute) gates every push to main
+# The offline suite (171 tests, well under a minute) gates every push to main
 # and every pull request. It needs the full runtime stack because both `main`
 # modules import torch/transformers, so CPU-only torch goes in first from the
-# PyTorch CPU wheel index; letting requirements.txt pull the default wheel would
-# drag in the CUDA build and blow the runner's disk.
+# PyTorch CPU wheel index -- with torchvision, which qwen-omni-utils imports at
+# module level; letting requirements.txt pull the default wheels would drag in the
+# CUDA build and blow the runner's disk.
 name: tests
 
 on:
@@ -25,10 +26,12 @@ jobs:
             train/requirements.txt
             pyproject.toml
 
-      - name: Install CPU-only torch
+      - name: Install CPU-only torch and torchvision
+        # torchvision comes from the same CPU index: the PyPI wheel is the CUDA build
+        # and would drag the nvidia libraries back in.
         run: |
           python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install the repo and its requirements
         # flash-attn stays optional: it needs a GPU toolchain and --no-build-isolation.
