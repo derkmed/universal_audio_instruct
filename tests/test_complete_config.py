@@ -9,13 +9,10 @@ Only requires `datasets`, `jinja2`, `huggingface_hub`.
 """
 import json
 import os
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data import build_complete_config, hub  # noqa: E402
-from uad_data.json_config_loader import UniversalJsonConfig  # noqa: E402
+from uad_data import build_complete_config, hub
+from uad_data.json_config_loader import UniversalJsonConfig
 
 SOURCES = {
     "complete-1.json": {"name": "Complete 1", "randomize_prompt_format": False,

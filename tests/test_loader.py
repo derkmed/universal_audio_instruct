@@ -13,14 +13,10 @@ import contextlib
 import io
 import json
 import os
-import sys
 import tarfile
 import tempfile
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data import filters, hub, loader, prompts  # noqa: E402
+from uad_data import filters, hub, loader, prompts
 
 # Real caption.json structure: 1 system instruction x 1 prompt x 2 outputs.
 CAPTION_PROMPT = {

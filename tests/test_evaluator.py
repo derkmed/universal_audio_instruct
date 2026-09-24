@@ -12,7 +12,6 @@ of `requirements.txt` (CPU `torch` is enough), and the `wer` metric from the
 import io
 import json
 import os
-import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Any, Iterable, NoReturn
@@ -20,13 +19,10 @@ from typing import Any, Iterable, NoReturn
 import numpy as np
 import soundfile as sf
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from eval.backends.base import InferenceRequest, ModelBackend  # noqa: E402
-from eval.config import EvalConfig  # noqa: E402
-from eval.evaluator import STATUSES, Evaluator  # noqa: E402
-from uad_data.load_report import (  # noqa: E402
+from eval.backends.base import InferenceRequest, ModelBackend
+from eval.config import EvalConfig
+from eval.evaluator import STATUSES, Evaluator
+from uad_data.load_report import (
     LoadedRows, LoadFailure, LoadReport, RenderFailure, SplitReport,
 )
 

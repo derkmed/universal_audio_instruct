@@ -9,15 +9,10 @@ group aggregates: corpus WER, mean hit rate, an empty prediction as a miss, and
 Runnable directly (`python tests/test_metrics.py`) or under pytest. Needs the
 `wer` metric from the `evaluate` package.
 """
-import os
-import sys
 from contextlib import contextmanager
 from typing import Any, Iterator, NoReturn, Optional
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from eval import metrics  # noqa: E402
+from eval import metrics
 
 
 def _row(task: str, **answer: Any) -> dict:

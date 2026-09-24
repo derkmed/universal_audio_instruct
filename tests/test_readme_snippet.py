@@ -11,12 +11,8 @@ import ast
 import inspect
 import os
 import re
-import sys
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data import load_uad_dataset  # noqa: E402
+from uad_data import load_uad_dataset
 
 README = os.path.join(os.path.dirname(__file__), "..", "README.md")
 

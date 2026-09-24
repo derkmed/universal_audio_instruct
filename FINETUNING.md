@@ -188,7 +188,7 @@ Mirror the existing pairs: implement the eval backend first
 turn. Export the classes from `eval/backends/__init__.py` and
 `train/backends/__init__.py`, register them in the dispatch dicts in both
 `main.py` files and in the Colab notebook's backend cell, and add the model to
-`eval.config.DEFAULT_MODEL_PATHS`.
+`models.DEFAULT_MODEL_PATHS`.
 
 ## Caveats & troubleshooting
 

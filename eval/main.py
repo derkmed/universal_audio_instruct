@@ -13,10 +13,12 @@ batched inference through the `Evaluator` and print/save metrics.
 import argparse
 import os
 
-from .backends import GemmaBackend, QwenBackend
-from .config import DEFAULT_MODEL_PATHS, DEFAULT_SEED, EvalConfig
-from .evaluator import Evaluator
+import models
 from uad_data import load_uad_dataset
+from uad_data import run_options
+from .backends import GemmaBackend, QwenBackend
+from .config import EvalConfig
+from .evaluator import Evaluator
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--model",
         required=True,
-        choices=list(DEFAULT_MODEL_PATHS),
+        choices=list(models.DEFAULT_MODEL_PATHS),
         dest="model_choice",
         help="Which model backend to use",
     )
@@ -76,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--seed",
         type=int,
-        default=DEFAULT_SEED,
+        default=run_options.DEFAULT_SEED,
         dest="seed",
         help="Seeds the prompt-template picks, so a clip keeps its template across runs",
     )

@@ -12,14 +12,10 @@ requires `datasets`, `jinja2`, `huggingface_hub`.
 """
 import logging
 import os
-import sys
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import test_loader_splits as fx
 
-import test_loader_splits as fx  # noqa: E402
-
-from uad_data.load_report import (  # noqa: E402
+from uad_data.load_report import (
     LoadFailure, LoadReport, RenderFailure, SplitReport)
 
 

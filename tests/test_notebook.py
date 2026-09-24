@@ -11,10 +11,7 @@ Runnable directly (`python tests/test_notebook.py`) or under pytest.
 import ast
 import json
 import os
-import sys
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 NOTEBOOK = os.path.join(
     os.path.dirname(__file__), "..", "eval", "colab_eval.ipynb")

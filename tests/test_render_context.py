@@ -8,13 +8,7 @@ without utterances must not accept one at all.
 Runnable directly (`python tests/test_render_context.py`) or under pytest.
 Only requires `datasets`.
 """
-import os
-import sys
-
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data.tasks import Task  # noqa: E402
+from uad_data.tasks import Task
 
 THREE_UTTERANCE_RECORD = {
     "audio_path": "segments/segment_3.wav",

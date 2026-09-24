@@ -15,18 +15,14 @@ import hashlib
 import json
 import logging
 import os
-import sys
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import test_loader_splits as fx
 
-import test_loader_splits as fx  # noqa: E402
+from huggingface_hub.errors import LocalEntryNotFoundError
 
-from huggingface_hub.errors import LocalEntryNotFoundError  # noqa: E402
-
-from uad_data import build_smoke_archives, smoke  # noqa: E402
+from uad_data import build_smoke_archives, smoke
 
 EMNS_MEMBERS = [f"emns/{i}.wav" for i in range(3)]
 CLOTHO_AND_EMNS = {

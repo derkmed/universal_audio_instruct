@@ -7,13 +7,7 @@ Descriptions are corpus text, so CONTEXT.md's glossary does not govern them
 Runnable directly (`python tests/test_corpus_descriptions.py`) or under pytest.
 Only requires `datasets`.
 """
-import os
-import sys
-
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data.internal_datasets import DATASETS_DIRECTORY  # noqa: E402
+from uad_data.internal_datasets import DATASETS_DIRECTORY
 
 
 def test_meld_description_uses_the_corpus_wording() -> None:

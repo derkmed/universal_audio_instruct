@@ -16,14 +16,10 @@ import contextlib
 import io
 import json
 import os
-import sys
 import tarfile
 import tempfile
 
-# Make the package importable when run directly from the repo root.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from uad_data import filters, hub, loader, prompts  # noqa: E402
+from uad_data import filters, hub, loader, prompts
 
 # Hub prompts/asr_timestamp_search.json at c4e1b16: 2 system instructions x 2 outputs.
 TIMESTAMP_PROMPT = {
