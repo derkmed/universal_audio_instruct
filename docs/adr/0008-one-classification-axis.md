@@ -67,16 +67,16 @@ register `classification` twice. MELD would want the same thing. That is a
 larger piece of work than #57 and is not done here.
 
 `tests/test_prompt_contract.py` holds the invariant this ADR relies on -- every
-registered task has a prompt file, and every prompt file renders from its task's
-features -- against `tests/hub_prompts.json`, which
-`python -m uad_data.check_hub_prompts` keeps honest against the Hub.
+registered task has a prompt file, and no registered task's prompt file renders a
+blank -- against `tests/hub_prompts.json`, which
+`python -m uad_data.check_hub_prompts` and `.github/workflows/hub-prompts.yml`
+keep honest against the Hub.
 
-## Noticed but not decided here
-
-`slurp_real`'s `categories` list has 90 entries, of which 30 are prefix-less
+One defect this surfaced and does not fix, recorded so the next reader does not
+rediscover it. `slurp_real`'s `categories` list has 90 entries, of which 30 are prefix-less
 duplicates: SLURP labels intents `scenario_action`, but 1,308 records (2.6%)
 carry only the action, so `joke` sits in the list beside `general_joke` and
 `hue_lightoff` beside `iot_hue_lightoff`. The list is `sorted(set(...))` of the
 column, so it inherits the defect. 27 of the 30 have exactly one compound twin
 and are mechanically repairable (759 records); `query` (481), `remove` (47) and
-`set` (21) do not and need the upstream scenario. Filed separately.
+`set` (21) do not and need the upstream scenario. Not filed yet.

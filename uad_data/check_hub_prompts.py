@@ -7,14 +7,24 @@ per task, its file and the jinja2 placeholders its templates use.
 registry -- which is how #57 (a registered task with no prompt file) is caught
 without a network call.
 
-This module is the other half: it fetches the real `prompts/` and compares.
+This module is the other half: it fetches the real `prompts/` and compares, so
+the recorded contract cannot quietly drift away from the Hub.
 
     python -m uad_data.check_hub_prompts            # verify, exit 1 on drift
     python -m uad_data.check_hub_prompts --write    # refresh after a Hub change
 
-Run it after editing anything in `prompts/` on the Hub, and commit the refreshed
-JSON with a note of what changed. Nothing in the offline suite can notice a Hub
-edit on its own.
+`tests/hub_prompts.json` records what the Hub **has**, not what it should have.
+When a prompt file is wrong, record the wrong value and register the defect in
+`test_prompt_contract.KNOWN_BAD_PLACEHOLDERS`; a contract that recorded the fix
+instead would leave the suite green while real runs stayed broken, and the next
+`--write` would turn it red for a reason the runner did not cause.
+
+`.github/workflows/hub-prompts.yml` runs the verify path on a schedule. Run it by
+hand after editing anything in `prompts/` on the Hub and commit the refreshed
+JSON; nothing in the offline suite can notice a Hub edit on its own.
+
+This is a development command: it reads and writes `tests/hub_prompts.json` in a
+checkout, and an installed copy of the package has no `tests/` to find.
 """
 import argparse
 import glob
@@ -29,9 +39,7 @@ import jinja2.meta
 from . import hub
 from . import prompts as prompts_lib
 
-CONTRACT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests", "hub_prompts.json")
+CONTRACT_RELPATH = os.path.join("tests", "hub_prompts.json")
 
 TEMPLATE_COLUMNS = (
     prompts_lib.SYSTEM_INSTRUCTIONS_COLUMN,
@@ -40,7 +48,32 @@ TEMPLATE_COLUMNS = (
 )
 
 
-def placeholders(template: str) -> set[str]:
+class NotACheckoutError(RuntimeError):
+    """`tests/hub_prompts.json` is not where the package sits.
+
+    Raised rather than letting the read fail with a bare `FileNotFoundError` --
+    or, worse, letting `--write` create the file under `site-packages/` and
+    report success for a contract nobody will ever read.
+    """
+
+
+def contract_path() -> str:
+    """Locate `tests/hub_prompts.json` from this module's place in a checkout.
+
+    `tests/` is not in `pyproject.toml`'s `packages`, so it is there for the
+    editable install the suite and CI use and absent from a plain `pip install .`.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, CONTRACT_RELPATH)
+    if not os.path.isdir(os.path.dirname(path)):
+        raise NotACheckoutError(
+            f"{CONTRACT_RELPATH} is not under {root}: this command reads and writes "
+            f"the repo's recorded contract, so run it from a checkout (pip install -e .), "
+            f"not from an installed copy of uad_data.")
+    return path
+
+
+def placeholder_names(template: str) -> set[str]:
     """The names a jinja2 template reads, e.g. `{{category}}` -> `{"category"}`.
 
     `io_templates.Template.make` renders with jinja2's default `Undefined`, so a
@@ -69,7 +102,7 @@ def build_contract(prompts_dir: str) -> dict[str, Any]:
         names: set[str] = set()
         for column in TEMPLATE_COLUMNS:
             for template in prompt_file.data.get(column, []):
-                names |= placeholders(template)
+                names |= placeholder_names(template)
         contract[task] = {
             "file": os.path.basename(path),
             "placeholders": sorted(names),
@@ -78,11 +111,20 @@ def build_contract(prompts_dir: str) -> dict[str, Any]:
 
 
 def read_contract() -> dict[str, Any]:
-    with open(CONTRACT_PATH, encoding="utf-8") as f:
+    with open(contract_path(), encoding="utf-8") as f:
         return json.load(f)
 
 
-def _diff(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
+def write_contract(contract: dict[str, Any]) -> str:
+    path = contract_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(contract, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return path
+
+
+def drift(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
+    """One line per task the recorded contract and the Hub disagree about."""
     lines = []
     for task in sorted(set(recorded) | set(live)):
         if task not in live:
@@ -94,34 +136,40 @@ def _diff(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
     return lines
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--write", action="store_true",
-        help="overwrite tests/hub_prompts.json with what the Hub holds")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m uad_data.check_hub_prompts",
+        description="Check tests/hub_prompts.json against the Hub's prompts/ folder.")
+    parser.add_argument("--write", action="store_true",
+                        help="Overwrite tests/hub_prompts.json with what the Hub holds.")
     parser.add_argument("--repo-id", default=hub.DEFAULT_REPO_ID)
-    parser.add_argument("--revision", default=None)
-    args = parser.parse_args(argv)
+    parser.add_argument("--revision", default=None, help="Hub revision to read prompts/ at.")
+    parser.add_argument("--token", default=None,
+                        help="HF token (default: the saved Hugging Face login).")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    # Fail before the download when there is nowhere to read or write the contract.
+    path = contract_path()
 
     prompts_dir = hub.download_prompts_dir(
-        repo_id=args.repo_id, revision=args.revision, token=os.environ.get("HF_TOKEN"))
+        repo_id=args.repo_id, revision=args.revision, token=args.token)
     live = build_contract(prompts_dir)
 
     if args.write:
-        with open(CONTRACT_PATH, "w", encoding="utf-8") as f:
-            json.dump(live, f, indent=2, sort_keys=True)
-            f.write("\n")
-        print(f"Wrote {len(live)} task(s) to {CONTRACT_PATH}")
-        return 0
+        print(f"Wrote {len(live)} task(s) to {write_contract(live)}")
+        return
 
-    drift = _diff(read_contract(), live)
-    if drift:
-        print(f"{CONTRACT_PATH} no longer matches {args.repo_id}:")
-        print("\n".join(drift))
-        print("\nRe-run with --write once the Hub is the way you want it.")
-        return 1
-    print(f"{len(live)} prompt file(s) match {CONTRACT_PATH}")
-    return 0
+    differences = drift(read_contract(), live)
+    if differences:
+        print(f"{path} no longer matches {args.repo_id}:")
+        print("\n".join(differences))
+        print("\nRecord what the Hub has -- re-run with --write -- and register any "
+              "defect in test_prompt_contract.KNOWN_BAD_PLACEHOLDERS.")
+        raise SystemExit(1)
+    print(f"{len(live)} prompt file(s) match {path}")
 
 
 if __name__ == "__main__":

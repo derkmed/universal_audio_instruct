@@ -55,7 +55,7 @@
   "intonation_detection": {
     "file": "intonation_detection.json",
     "placeholders": [
-      "category"
+      "intonation"
     ]
   },
   "qa": {
@@ -68,7 +68,7 @@
   "sentiment_analysis": {
     "file": "sentiment_analysis.json",
     "placeholders": [
-      "Sentiment"
+      "sentiment"
     ]
   }
 }

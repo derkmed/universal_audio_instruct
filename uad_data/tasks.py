@@ -22,6 +22,11 @@ class Task(enum.Enum):
     QA = "qa"
     ENGLISH_TRANSLATION = "english_translation"
     INTENT_DETECTION_NL = "intent_detection_nl"
+    # The old rule here -- "classification tasks should be suffixed with
+    # 'classification'" -- is retired by ADR-0008: a dataset labels one axis and
+    # that axis is `classification`, so there are no suffixed siblings left to
+    # name. The two below are the last holdouts and neither is suffixed.
+    #
     # Kept only because `prompts/` still holds a file naming each one, and
     # `_get_prompt_templates` builds a `PromptFilepath` for every file it globs:
     # dropping the member would make `Task(...)` raise on that file and take

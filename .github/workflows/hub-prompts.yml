@@ -1,0 +1,49 @@
+# The offline suite checks the task registry against `tests/hub_prompts.json`,
+# which is a recording of the Hub's `prompts/` folder, not the folder itself. A
+# prompt file added, deleted or edited on the Hub cannot make that suite fail, so
+# this job is what notices -- the piece #57 was missing, where a registered task
+# with no prompt file reached a real run before anything complained.
+#
+# Weekly, and on demand. It reads one Hub folder, so it is cheap; it is separate
+# from `tests.yml` because it needs the network and a token, and the offline
+# suite must stay runnable without either.
+name: hub prompts
+
+on:
+  schedule:
+    # Mondays, 07:00 UTC.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # No torch: this command imports `uad_data.hub`, `uad_data.prompts` and
+      # `uad_data.tasks`, none of which pull in a model stack.
+      - name: Install what the check needs
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . huggingface_hub jinja2 datasets
+
+      - name: Check the Hub's prompts against tests/hub_prompts.json
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        # The dataset repo is private, so without the secret there is nothing to
+        # check. Say so and stop rather than failing: a fork has no secret, and a
+        # red X nobody can fix is a red X everybody learns to ignore.
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::notice::HF_TOKEN is not set, so the Hub cannot be read. Skipping."
+            exit 0
+          fi
+          python -m uad_data.check_hub_prompts

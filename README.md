@@ -111,7 +111,7 @@ mirroring the eval backends. Three modes: QLoRA (default), LoRA on a bf16 base
 
 ## Keeping the Hub in step (operator commands)
 
-Two commands in `uad_data` produce files that live on the Hub. Neither runs
+Three commands in `uad_data` keep this repo and the Hub in step. None runs
 during a normal evaluation or training run; rerun them when the dataset changes
 and upload the results.
 
@@ -125,7 +125,20 @@ python -m uad_data.build_smoke_archives --clips-per-split 10
 # complete-1..5 stay the source of truth; upload the output to
 # universal_audio_dataset_configs/complete.json.
 python -m uad_data.build_complete_config --output outputs/complete.json
+
+# tests/hub_prompts.json: what the Hub's prompts/ folder holds, per task -- its
+# file and the placeholders its templates read. The offline suite checks the task
+# registry against this recording, because it cannot reach the Hub itself.
+# Verify after any edit to prompts/ on the Hub, and commit the refreshed file.
+python -m uad_data.check_hub_prompts            # exits 1 on drift
+python -m uad_data.check_hub_prompts --write    # record what the Hub now holds
 ```
+
+`check_hub_prompts` records what the Hub **has**, defects included. When a prompt
+file is wrong, record the wrong value and register the defect in
+`tests/test_prompt_contract.py`'s `KNOWN_BAD_PLACEHOLDERS`: a recording that
+claimed a fix which had not landed would leave the suite green while real runs
+rendered blanks. `.github/workflows/hub-prompts.yml` runs the verify path weekly.
 
 Rerun `build_smoke_archives` whenever an internal dataset's archive or a split's
 metadata JSON changes. Forgetting is safe but slow: the loader compares the
@@ -152,8 +165,11 @@ For a dataset called `MyDataset`:
    on the Hub. `Task.features` lists the metadata fields that task reads (e.g.
    `classification` needs `category` and `categories`; `asr` needs
    `transcription`), so name your metadata fields to match. If you need a new
-   task, add an enum value and its `features` entry here, and upload a matching
-   prompt file to the Hub.
+   task, add an enum value and its `features` entry here, upload a matching
+   prompt file to the Hub, and run `python -m uad_data.check_hub_prompts --write`
+   so the offline suite knows the file exists. Every placeholder the file reads
+   must be a key of that task's `features`, or jinja2 renders it as an empty
+   string and every row of the task is silently wrong.
 2. **Upload the data to the HF repo**, following the dataset card:
    `data/MyDataset/MyDataset.tar.gz` plus one `data/MyDataset/MyDataset_<split>.json`
    per split. Each `audio_path` in the metadata must match an archive member path
