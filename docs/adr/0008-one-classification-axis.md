@@ -94,4 +94,4 @@ carry only the action, so `joke` sits in the list beside `general_joke` and
 `hue_lightoff` beside `iot_hue_lightoff`. The list is `sorted(set(...))` of the
 column, so it inherits the defect. 27 of the 30 have exactly one compound twin
 and are mechanically repairable (759 records); `query` (481), `remove` (47) and
-`set` (21) do not and need the upstream scenario. Not filed yet.
+`set` (21) do not and need the upstream scenario. Filed as #65.
