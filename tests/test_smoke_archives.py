@@ -4,12 +4,15 @@
 split, in archive order, from a full archive into a smoke archive, and records
 the read error that stopped it, if any. `stale_sources` is the builder's safety
 check for a local copy of the dataset. `hub.file_sha256` reads a file's LFS
-sha256 from the Hub; here its `HfApi` is replaced with a fake.
+sha256 from the Hub; here its `HfApi` is replaced with a fake. The builder's
+`--clips-per-split` argument type is checked here too, since it enforces the same
+cap rule the loader and both configs do.
 
 Reuses the synthetic archives of `test_loader_splits.py`. Runnable directly
 (`python tests/test_smoke_archives.py`) or under pytest. Only requires
 `datasets`, `jinja2`, `huggingface_hub`.
 """
+import argparse
 import hashlib
 import io
 import json
@@ -22,7 +25,7 @@ import test_loader_splits as fx
 
 from huggingface_hub.hf_api import RepoFile
 
-from uad_data import build_smoke_archives, hub, internal_datasets, smoke
+from uad_data import build_smoke_archives, hub, internal_datasets, run_options, smoke
 
 T = TypeVar("T")
 
@@ -354,6 +357,23 @@ def test_manifest_round_trips() -> None:
         assert smoke.read_manifest(path) == entries
 
     print("PASS: the manifest reads back what was written.")
+
+
+def test_the_clips_per_split_argument_type_reports_the_shared_cap_message() -> None:
+    """The cap rule lives in `run_options`; argparse must not restate it."""
+    try:
+        run_options.validate_clips_per_split(0)
+    except ValueError as shared:
+        expected = str(shared)
+
+    try:
+        build_smoke_archives._positive_int("0")
+    except argparse.ArgumentTypeError as error:
+        assert expected in str(error), (str(error), expected)
+    else:
+        raise AssertionError("_positive_int accepted 0")
+
+    print("PASS: --clips-per-split reports the shared cap message.")
 
 
 if __name__ == "__main__":

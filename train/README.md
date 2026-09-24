@@ -9,7 +9,7 @@ Three modes — **QLoRA** (default), **LoRA** on a bf16 base (`--no-4bit`), and
 **full finetune** (`--no-4bit --no-lora`).
 
 ```bash
-pip install -r requirements.txt -r train/requirements.txt
+pip install -e . -r requirements.txt -r train/requirements.txt
 export HF_TOKEN=...
 
 # smoke test

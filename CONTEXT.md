@@ -43,6 +43,10 @@ TODO(derkmed): revisit Row vs Example one day.
 A named selection of internal datasets, and for each the splits and tasks to include, that a training or evaluation run draws its rows from.
 _Avoid_: UAD config, collection
 
+**Run options**:
+The handful of answers, shared by both harnesses and the loader, to "how many clips per split?" and "which split, when none was asked for?". A run config says *what* rows exist; run options narrow *how many* of them one run builds.
+_Avoid_: run settings, run parameters
+
 **Selected split**:
 A split that a run actually loads for an internal dataset: one that the run config lists for that dataset and that the run also asked for.
 _Avoid_: configured split, active split

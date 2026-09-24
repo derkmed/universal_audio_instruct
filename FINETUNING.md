@@ -65,7 +65,7 @@ https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora
 ## Usage
 
 ```bash
-pip install -r requirements.txt -r train/requirements.txt
+pip install -e . -r requirements.txt -r train/requirements.txt
 export HF_TOKEN=...   # the dataset is private; some models are gated
 ```
 

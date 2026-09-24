@@ -1,4 +1,4 @@
-# The offline suite (~170 tests, well under a minute) gates every push to main
+# The offline suite (166 tests, well under a minute) gates every push to main
 # and every pull request. It needs the full runtime stack because both `main`
 # modules import torch/transformers, so CPU-only torch goes in first from the
 # PyTorch CPU wheel index; letting requirements.txt pull the default wheel would
@@ -32,7 +32,11 @@ jobs:
 
       - name: Install the repo and its requirements
         # flash-attn stays optional: it needs a GPU toolchain and --no-build-isolation.
-        run: pip install -e . -r requirements.txt -r train/requirements.txt
+        run: pip install -e '.[test]' -r requirements.txt -r train/requirements.txt
 
       - name: Run the offline suite
-        run: python -m pytest tests
+        # Run from outside the repo root: `python -m pytest` prepends the cwd to
+        # sys.path, so from the root the source tree -- not the editable install --
+        # would satisfy every import, and a broken pyproject would still look green.
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest "$GITHUB_WORKSPACE/tests"

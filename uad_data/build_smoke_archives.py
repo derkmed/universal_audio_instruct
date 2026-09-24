@@ -35,7 +35,7 @@ import zlib
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator
 
-from . import hub, smoke
+from . import hub, run_options, smoke
 from .clip_quota import ClipQuota, wanted_clips
 from .internal_dataset import InternalDataset
 from .internal_datasets import DATASETS_DIRECTORY
@@ -217,9 +217,22 @@ def _open_source(internal_dataset: InternalDataset, options: BuildOptions) -> It
 
 
 def _positive_int(value: str) -> int:
+    """Coerce `--clips-per-split`, deferring the cap rule to `run_options`.
+
+    Args:
+        value: The raw command-line string.
+
+    Returns:
+        The cap, as an int.
+
+    Raises:
+        argparse.ArgumentTypeError: The value is not an int, or is below 1.
+    """
     number = int(value)
-    if number < 1:
-        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value}")
+    try:
+        run_options.validate_clips_per_split(number)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
     return number
 
 
