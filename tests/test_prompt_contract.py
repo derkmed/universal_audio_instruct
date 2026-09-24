@@ -57,9 +57,27 @@ def _render_context_keys(task: Task) -> set[str]:
     return set(features)
 
 
+def _task(task_value: str) -> Task:
+    """`Task(task_value)`, but failing as an assertion rather than a ValueError.
+
+    `test_every_recorded_prompt_file_names_a_real_task` is the test that explains
+    an unknown task, and running the whole file reaches it first. A selective run
+    (`pytest -k renders_a_blank`) does not, so without this the helper would raise
+    a bare `ValueError` from three frames down and say none of it.
+    """
+    try:
+        return Task(task_value)
+    except ValueError:
+        raise AssertionError(
+            f"tests/hub_prompts.json records {task_value!r}, which is not in Task. "
+            f"See test_every_recorded_prompt_file_names_a_real_task: while such a "
+            f"file is on the Hub, _get_prompt_templates raises for every task."
+        ) from None
+
+
 def _unrenderable(task_value: str, entry: dict) -> set[str]:
     """Placeholders the task's render context has no value for."""
-    return set(entry["placeholders"]) - _render_context_keys(Task(task_value))
+    return set(entry["placeholders"]) - _render_context_keys(_task(task_value))
 
 
 def test_every_recorded_prompt_file_names_a_real_task() -> None:
@@ -69,8 +87,9 @@ def test_every_recorded_prompt_file_names_a_real_task() -> None:
     of `prompts/`, and that constructor calls `Task(...)`, so one file naming an
     unknown task raises before any task's templates are found. That is why a
     `Task` member and its prompt file have to be added and removed in one move --
-    and why this is checked before the tests that call `Task(...)` themselves,
-    which would otherwise fail with a bare ValueError instead of saying so.
+    and why this is checked before the tests that call `Task(...)` themselves.
+    A selective run can skip that ordering, so `_task` repeats the explanation
+    rather than letting a helper raise a bare ValueError.
     """
     unknown = sorted(t for t in _contract() if t not in {task.value for task in Task})
     assert not unknown, (
@@ -103,7 +122,7 @@ def test_no_prompt_file_renders_a_blank() -> None:
     """
     for task_value, entry in sorted(_contract().items()):
         unrenderable = sorted(_unrenderable(task_value, entry))
-        task = Task(task_value)
+        task = _task(task_value)
         assert not unrenderable, (
             f"{entry['file']} reads {unrenderable}, which Task.{task.name}.render_context "
             f"never supplies (it gives {sorted(_render_context_keys(task))}). jinja2 "

@@ -26,6 +26,28 @@ PROMPTS_COLUMN = 'prompts'
 OUTPUTS_COLUMN = 'outputs'
 TASK_COLUMN = 'task'
 
+def validate_shape(filepath: str, data: dict[str, Any]) -> None:
+    """The checks `PromptFilepath` makes that do not need a known task.
+
+    Split out so `check_hub_prompts.build_contract` can apply exactly these to a
+    file naming a task this code does not have. That command must tolerate the
+    unknown task -- reporting which file carries it is the whole point, and
+    raising would only reproduce the outage it is looking for -- but tolerating
+    the task must not mean skipping everything else the loader will enforce
+    later. Sharing the rules is what keeps the two from drifting apart.
+    """
+    if not filepath.endswith('.json'):
+        raise ValueError('PromptFilepath only supports JSON files.')
+    if TASK_COLUMN not in data:
+        raise ValueError(
+            f'File {filepath} is missing JSON string column "{TASK_COLUMN}".'
+            ' This task should match the value of a registered task in tasks.py.')
+    if SYSTEM_INSTRUCTIONS_COLUMN not in data and PROMPTS_COLUMN not in data:
+        raise ValueError(
+            f'File {filepath} must contain at least one of '
+            f'"{SYSTEM_INSTRUCTIONS_COLUMN}" or "{PROMPTS_COLUMN}".')
+
+
 class PromptFilepath:
     """Wrapper for filepath to validate and parse out prompt templates.
 
@@ -40,16 +62,7 @@ class PromptFilepath:
 
     def __init__(self, filepath: str):
         self.filepath = filepath
-        if not self.filepath.endswith('.json'):
-            raise ValueError('PromptFilepath only supports JSON files.')
-        if TASK_COLUMN not in self.data.keys():
-            raise ValueError(
-                f'File {self.filepath} is missing JSON string column "{TASK_COLUMN}".'
-                ' This task should match the value of a registered task in tasks.py.')
-        if SYSTEM_INSTRUCTIONS_COLUMN not in self.data and PROMPTS_COLUMN not in self.data:
-            raise ValueError(
-                f'File {self.filepath} must contain at least one of '
-                f'"{SYSTEM_INSTRUCTIONS_COLUMN}" or "{PROMPTS_COLUMN}".')
+        validate_shape(self.filepath, self.data)
         self.task = tasks_lib.Task(self.data[TASK_COLUMN])
 
     @functools.cached_property

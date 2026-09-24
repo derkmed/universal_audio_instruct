@@ -28,12 +28,22 @@ jobs:
         with:
           python-version: "3.10"
 
-      # No torch: this command imports `uad_data.hub`, `uad_data.prompts` and
-      # `uad_data.tasks`, none of which pull in a model stack.
+      # `python -m uad_data.check_hub_prompts` imports `uad_data/__init__.py`
+      # first, so this pulls in `loader` and everything under it -- not just the
+      # three modules the command itself uses. That graph needs no torch today
+      # (nothing in `uad_data` imports it, and `datasets` only probes for it with
+      # `find_spec`), which is why this install list is so much smaller than
+      # `requirements.txt`. A bare `import torch` anywhere in the graph would
+      # break this job, so check the whole of `uad_data`, not those three files.
+      #
+      # `datasets` is pinned to match `requirements.txt`: unpinned it resolves
+      # several majors ahead, and `tasks.py` and `internal_dataset.py` both call
+      # `datasets.Value` / `datasets.Split`. A weekly job that reddens for a
+      # reason unrelated to the Hub is a weekly job people stop reading.
       - name: Install what the check needs
         run: |
           python -m pip install --upgrade pip
-          pip install -e . huggingface_hub jinja2 datasets
+          pip install -e . huggingface_hub jinja2 'datasets==3.6.0'
 
       - name: Check the Hub's prompts against tests/hub_prompts.json
         env:

@@ -40,6 +40,7 @@ import jinja2.meta
 from . import hub
 from . import prompts as prompts_lib
 from . import tasks
+from .internal_datasets import DATASETS_DIRECTORY
 
 CONTRACT_RELPATH = os.path.join("tests", "hub_prompts.json")
 
@@ -105,11 +106,25 @@ def build_contract(prompts_dir: str) -> dict[str, Any]:
     for path in sorted(glob.glob(os.path.join(prompts_dir, "*.json"))):
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        task = data.get(prompts_lib.TASK_COLUMN)
+        # Everything PromptFilepath checks except the task lookup itself, from
+        # the same function it uses, so the two cannot drift apart.
+        prompts_lib.validate_shape(path, data)
+        task = data[prompts_lib.TASK_COLUMN]
         if not isinstance(task, str):
             raise ValueError(
-                f"{os.path.basename(path)} has no {prompts_lib.TASK_COLUMN!r} string; "
-                f"PromptFilepath rejects it and so does this.")
+                f"{os.path.basename(path)} has a non-string "
+                f"{prompts_lib.TASK_COLUMN!r}; Task() rejects it and so does this.")
+        # `all_templates` drops every combination whose system instruction and
+        # prompt are both absent, so two empty arrays give an empty cross product
+        # and `_get_prompt_templates` raises PromptTemplateError. The keys are
+        # present, so `validate_shape` cannot see it.
+        if not (data.get(prompts_lib.SYSTEM_INSTRUCTIONS_COLUMN)
+                or data.get(prompts_lib.PROMPTS_COLUMN)):
+            raise ValueError(
+                f"{os.path.basename(path)} gives no templates: "
+                f"{prompts_lib.SYSTEM_INSTRUCTIONS_COLUMN!r} and "
+                f"{prompts_lib.PROMPTS_COLUMN!r} are both empty or absent, so "
+                f"_get_prompt_templates raises PromptTemplateError for {task!r}.")
         if task in contract:
             raise ValueError(
                 f"{os.path.basename(path)} and {contract[task]['file']} both claim "
@@ -126,7 +141,13 @@ def build_contract(prompts_dir: str) -> dict[str, Any]:
 
 
 def read_contract() -> dict[str, Any]:
-    with open(contract_path(), encoding="utf-8") as f:
+    path = contract_path()
+    if not os.path.isfile(path):
+        raise NotACheckoutError(
+            f"{path} does not exist. It is the recording of the Hub's prompts/ "
+            f"that the offline suite checks against; create it with "
+            f"`python -m uad_data.check_hub_prompts --write`.")
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -138,12 +159,25 @@ def write_contract(contract: dict[str, Any]) -> str:
     return path
 
 
-def _is_a_task(value: str) -> bool:
+def _why_recording_it_is_not_enough(task: str) -> str:
+    """The rest of the sentence for a prompt file the recording does not have.
+
+    `--write` is the standing advice for drift, and for these two cases following
+    it alone trades one red for another, so the message says so before the
+    operator runs it.
+    """
     try:
-        tasks.Task(value)
+        tasks.Task(task)
     except ValueError:
-        return False
-    return True
+        return (" -- and is not a Task, so every task's lookup raises while it is "
+                "there. Add the Task member or delete the file; --write alone "
+                "records the outage.")
+    registered = {t.value for d in DATASETS_DIRECTORY.values() for t in d.tasks}
+    if task not in registered:
+        return (" -- and no dataset registers it, so --write alone fails "
+                "test_every_prompt_file_has_a_dataset. Register it in "
+                "uad_data/internal_datasets.py, or delete the file.")
+    return ""
 
 
 def drift(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
@@ -153,9 +187,9 @@ def drift(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
         if task not in live:
             lines.append(f"  {task}: recorded as {recorded[task]['file']}, gone from the Hub")
         elif task not in recorded:
-            known = "" if _is_a_task(task) else " -- and is not a Task, so every task's lookup raises while it is there"
             lines.append(
-                f"  {task}: {live[task]['file']} is on the Hub, not recorded{known}")
+                f"  {task}: {live[task]['file']} is on the Hub, not recorded"
+                f"{_why_recording_it_is_not_enough(task)}")
         elif recorded[task] != live[task]:
             lines.append(f"  {task}: recorded {recorded[task]}, Hub has {live[task]}")
     return lines
