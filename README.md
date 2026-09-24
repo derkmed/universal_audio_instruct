@@ -134,11 +134,13 @@ python -m uad_data.check_hub_prompts            # exits 1 on drift
 python -m uad_data.check_hub_prompts --write    # record what the Hub now holds
 ```
 
-`check_hub_prompts` records what the Hub **has**, defects included. When a prompt
-file is wrong, record the wrong value and register the defect in
-`tests/test_prompt_contract.py`'s `KNOWN_BAD_PLACEHOLDERS`: a recording that
-claimed a fix which had not landed would leave the suite green while real runs
-rendered blanks. `.github/workflows/hub-prompts.yml` runs the verify path weekly.
+`check_hub_prompts` records what the Hub **has**, not what it should have: a
+recording that claimed a fix which had not landed would leave the suite green
+while real runs rendered blanks. So when `tests/test_prompt_contract.py` fails on
+a prompt file, the fix is on the Hub -- edit the file, or delete it along with its
+`Task` member -- followed by a `--write`, never an edit to the recording or an
+exemption in the test. `.github/workflows/hub-prompts.yml` runs the verify path
+weekly.
 
 Rerun `build_smoke_archives` whenever an internal dataset's archive or a split's
 metadata JSON changes. Forgetting is safe but slow: the loader compares the
@@ -169,7 +171,10 @@ For a dataset called `MyDataset`:
    prompt file to the Hub, and run `python -m uad_data.check_hub_prompts --write`
    so the offline suite knows the file exists. Every placeholder the file reads
    must be a key of that task's `features`, or jinja2 renders it as an empty
-   string and every row of the task is silently wrong.
+   string and every row of the task is silently wrong. The suite checks that for
+   every file on the Hub, and it also checks the other direction: a prompt file
+   no dataset registers fails the suite, so land the file and step 3's
+   registration in the same change rather than uploading the file ahead of it.
 2. **Upload the data to the HF repo**, following the dataset card:
    `data/MyDataset/MyDataset.tar.gz` plus one `data/MyDataset/MyDataset_<split>.json`
    per split. Each `audio_path` in the metadata must match an archive member path

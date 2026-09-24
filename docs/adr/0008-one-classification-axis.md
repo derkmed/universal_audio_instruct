@@ -48,12 +48,24 @@ equal on all 50,569 records -- so `intent_detection` would have rendered the sam
 label twice. `action` keeps its column and loses its task, as MELD's `Sentiment`
 did.
 
-`Task.INTENT_DETECTION` and `Task.ACTION_CLASSIFICATION` are removed.
-`Task.SENTIMENT_ANALYSIS` and `Task.INTONATION_DETECTION` are not, although no
-dataset registers them: `prompts/` still holds a file naming each, and
-`_get_prompt_templates` builds a `PromptFilepath` for every file it globs, so a
-missing enum member would make `Task(...)` raise on that file and take every
-other task's lookup down with it. They are removable once the files are.
+`Task.INTENT_DETECTION` and `Task.ACTION_CLASSIFICATION` are removed, and so are
+`Task.SENTIMENT_ANALYSIS` and `Task.INTONATION_DETECTION`, together with
+`prompts/sentiment_analysis.json` and `prompts/intonation_detection.json` on the
+Hub. The members and the files have to go in one move: `_get_prompt_templates`
+builds a `PromptFilepath` for every file it globs, so a file left behind without
+its member makes `Task(...)` raise there and takes every other task's lookup down
+with it.
+
+Removing them was safe because nothing reached them from either side. No dataset
+registered either task -- what they label is `classification` now, so MELD's
+emotions and MLEnd_Intonation's intonations both arrive as
+`category`/`categories` -- so no run could select one, and the files were never
+rendered. Nor were they worth keeping against a future need: each read a
+placeholder its task's `features` never supplied (`{{intonation}}` against
+`category`, `{{sentiment}}` against `Sentiment`), so jinja2's default `Undefined`
+would have rendered the label as an empty string and generated the row anyway.
+Whatever a second axis eventually needs -- see Consequences -- it is not a file
+that silently produces blanks.
 
 ## Consequences
 
@@ -66,11 +78,14 @@ second label column plus its candidate list, and a way for one dataset to
 register `classification` twice. MELD would want the same thing. That is a
 larger piece of work than #57 and is not done here.
 
-`tests/test_prompt_contract.py` holds the invariant this ADR relies on -- every
-registered task has a prompt file, and no registered task's prompt file renders a
-blank -- against `tests/hub_prompts.json`, which
-`python -m uad_data.check_hub_prompts` and `.github/workflows/hub-prompts.yml`
-keep honest against the Hub.
+`tests/test_prompt_contract.py` holds the invariants this ADR relies on -- every
+registered task has a prompt file, no prompt file renders a blank, and every
+prompt file has a dataset that registers it -- against `tests/hub_prompts.json`,
+which `python -m uad_data.check_hub_prompts` and
+`.github/workflows/hub-prompts.yml` keep honest against the Hub. The third of
+those is what the removals above buy: with no orphan files left to exempt, all
+three hold unconditionally, so a broken prompt file is caught whether or not
+anything renders it yet.
 
 One defect this surfaced and does not fix, recorded so the next reader does not
 rediscover it. `slurp_real`'s `categories` list has 90 entries, of which 30 are prefix-less

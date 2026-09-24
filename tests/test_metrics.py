@@ -79,11 +79,20 @@ def test_each_task_names_its_metric_and_answer_field() -> None:
 
 
 def test_a_task_outside_the_table_has_no_metric() -> None:
-    """Only the six tasks complete-1..5 use have a metric; the rest report nothing."""
-    assert metrics.metric_name("sentiment_analysis") is None
-    assert metrics.answer_field("sentiment_analysis") is None
-    assert metrics.metric_value(_row("sentiment_analysis", Sentiment="happy"), "happy") is None
-    assert metrics.aggregate("sentiment_analysis", [(_row("sentiment_analysis"), "x")]) is None
+    """Only the six tasks complete-1..5 use have a metric; the rest report nothing.
+
+    The name is deliberately fictional. `_METRICS` is a plain dict keyed by the
+    row's `task` string and never resolves a `Task`, so anything outside the table
+    takes the same path -- and a name nothing can ever define keeps it that way.
+    This used to read `sentiment_analysis`, which was a real `Task` until ADR-0008
+    removed it; once removed, that name claimed a relationship to the registry the
+    test never had, and the next reader would have gone looking for it.
+    """
+    absent = "no_such_task"
+    assert metrics.metric_name(absent) is None
+    assert metrics.answer_field(absent) is None
+    assert metrics.metric_value(_row(absent, answer="happy"), "happy") is None
+    assert metrics.aggregate(absent, [(_row(absent), "x")]) is None
 
     print("PASS: a task outside the metric table has no metric.")
 

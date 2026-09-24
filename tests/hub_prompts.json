@@ -52,23 +52,11 @@
       "intent_nl"
     ]
   },
-  "intonation_detection": {
-    "file": "intonation_detection.json",
-    "placeholders": [
-      "intonation"
-    ]
-  },
   "qa": {
     "file": "qa.json",
     "placeholders": [
       "answer",
       "question"
-    ]
-  },
-  "sentiment_analysis": {
-    "file": "sentiment_analysis.json",
-    "placeholders": [
-      "sentiment"
     ]
   }
 }

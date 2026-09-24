@@ -14,10 +14,11 @@ the recorded contract cannot quietly drift away from the Hub.
     python -m uad_data.check_hub_prompts --write    # refresh after a Hub change
 
 `tests/hub_prompts.json` records what the Hub **has**, not what it should have.
-When a prompt file is wrong, record the wrong value and register the defect in
-`test_prompt_contract.KNOWN_BAD_PLACEHOLDERS`; a contract that recorded the fix
-instead would leave the suite green while real runs stayed broken, and the next
-`--write` would turn it red for a reason the runner did not cause.
+A contract edited by hand to describe a fix nobody had pushed would leave the
+offline suite green while real runs stayed broken, and the next `--write` would
+turn it red for a reason the runner did not cause. So the only way to change the
+recording is to change the Hub and re-run `--write`: when the offline suite fails
+on a prompt file, fix the file on the Hub rather than the recording of it.
 
 `.github/workflows/hub-prompts.yml` runs the verify path on a schedule. Run it by
 hand after editing anything in `prompts/` on the Hub and commit the refreshed
@@ -38,6 +39,7 @@ import jinja2.meta
 
 from . import hub
 from . import prompts as prompts_lib
+from . import tasks
 
 CONTRACT_RELPATH = os.path.join("tests", "hub_prompts.json")
 
@@ -90,18 +92,31 @@ def build_contract(prompts_dir: str) -> dict[str, Any]:
     Keyed by task value so the file diffs readably, one block per task. Raises if
     two files claim the same task: `_get_prompt_templates` treats that as a config
     error, and the contract should not paper over it.
+
+    A file naming a task this code does not have is recorded, not raised on. It is
+    the most important thing this command can find -- `_get_prompt_templates`
+    builds a `PromptFilepath` for every file it globs, so one such file makes
+    `Task(...)` raise for *every* task and takes a whole run down, which is why
+    a prompt file and its `Task` member have to be added and removed together.
+    Reporting it as drift names the file; raising here would only reproduce the
+    outage, with a traceback in place of an explanation.
     """
     contract: dict[str, Any] = {}
     for path in sorted(glob.glob(os.path.join(prompts_dir, "*.json"))):
-        prompt_file = prompts_lib.PromptFilepath(filepath=path)
-        task = prompt_file.task.value
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        task = data.get(prompts_lib.TASK_COLUMN)
+        if not isinstance(task, str):
+            raise ValueError(
+                f"{os.path.basename(path)} has no {prompts_lib.TASK_COLUMN!r} string; "
+                f"PromptFilepath rejects it and so does this.")
         if task in contract:
             raise ValueError(
                 f"{os.path.basename(path)} and {contract[task]['file']} both claim "
                 f"task {task!r}; _get_prompt_templates accepts only one.")
         names: set[str] = set()
         for column in TEMPLATE_COLUMNS:
-            for template in prompt_file.data.get(column, []):
+            for template in data.get(column, []):
                 names |= placeholder_names(template)
         contract[task] = {
             "file": os.path.basename(path),
@@ -123,6 +138,14 @@ def write_contract(contract: dict[str, Any]) -> str:
     return path
 
 
+def _is_a_task(value: str) -> bool:
+    try:
+        tasks.Task(value)
+    except ValueError:
+        return False
+    return True
+
+
 def drift(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
     """One line per task the recorded contract and the Hub disagree about."""
     lines = []
@@ -130,7 +153,9 @@ def drift(recorded: dict[str, Any], live: dict[str, Any]) -> list[str]:
         if task not in live:
             lines.append(f"  {task}: recorded as {recorded[task]['file']}, gone from the Hub")
         elif task not in recorded:
-            lines.append(f"  {task}: {live[task]['file']} is on the Hub, not recorded")
+            known = "" if _is_a_task(task) else " -- and is not a Task, so every task's lookup raises while it is there"
+            lines.append(
+                f"  {task}: {live[task]['file']} is on the Hub, not recorded{known}")
         elif recorded[task] != live[task]:
             lines.append(f"  {task}: recorded {recorded[task]}, Hub has {live[task]}")
     return lines
@@ -166,8 +191,9 @@ def main(argv: list[str] | None = None) -> None:
     if differences:
         print(f"{path} no longer matches {args.repo_id}:")
         print("\n".join(differences))
-        print("\nRecord what the Hub has -- re-run with --write -- and register any "
-              "defect in test_prompt_contract.KNOWN_BAD_PLACEHOLDERS.")
+        print("\nRe-run with --write to record what the Hub has. If what it has is "
+              "wrong, fix it on the Hub first: this file records the Hub, never the "
+              "intention.")
         raise SystemExit(1)
     print(f"{len(live)} prompt file(s) match {path}")
 

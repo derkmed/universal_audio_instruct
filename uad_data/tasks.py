@@ -13,6 +13,11 @@ from typing import Any
 
 class Task(enum.Enum):
     """Enum class for Audio Understanding tasks."""
+    # A task is named for what it asks the model to do, with no suffix for its
+    # shape. The old rule -- "classification tasks should be suffixed with
+    # 'classification'" -- is retired by ADR-0008: a dataset labels one axis and
+    # that axis is `classification`, so there are no suffixed siblings left for a
+    # suffix to tell apart.
     ASR = "asr"
     ASR_TIMESTAMP_SEARCH = "asr_timestamp_search"
     CLASSIFICATION = "classification"
@@ -22,19 +27,6 @@ class Task(enum.Enum):
     QA = "qa"
     ENGLISH_TRANSLATION = "english_translation"
     INTENT_DETECTION_NL = "intent_detection_nl"
-    # The old rule here -- "classification tasks should be suffixed with
-    # 'classification'" -- is retired by ADR-0008: a dataset labels one axis and
-    # that axis is `classification`, so there are no suffixed siblings left to
-    # name. The two below are the last holdouts and neither is suffixed.
-    #
-    # Kept only because `prompts/` still holds a file naming each one, and
-    # `_get_prompt_templates` builds a `PromptFilepath` for every file it globs:
-    # dropping the member would make `Task(...)` raise on that file and take
-    # every other task's lookup down with it. No dataset registers either --
-    # what they label is `classification` now (ADR-0008), so MELD's emotions and
-    # MLEnd_Intonation's intonations both arrive as `category`/`categories`.
-    SENTIMENT_ANALYSIS = "sentiment_analysis"
-    INTONATION_DETECTION = "intonation_detection"
 
     @property
     def features(self) -> dict[str, Any]:
@@ -60,8 +52,6 @@ class Task(enum.Enum):
             }
         elif self == Task.ASR:
             return {'transcription': datasets.Value('string')}
-        elif self == Task.SENTIMENT_ANALYSIS:
-            return {'Sentiment': datasets.Value('string')}
         elif self == Task.CAPTION:
             return {'caption': datasets.Value('string')}
         elif self == Task.COMMONSENSE:
@@ -80,8 +70,6 @@ class Task(enum.Enum):
             return {"english_translation": datasets.Value("string")}
         elif self == Task.INTENT_DETECTION_NL:
             return {"intent_nl": datasets.Value("string")}
-        elif self == Task.INTONATION_DETECTION:
-            return {"category": datasets.Value("string")}
         else:
             raise NotImplementedError(
                 f'{self.value} prompt handling not yet implemented.')

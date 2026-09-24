@@ -13,11 +13,19 @@ real run before anything noticed:
 
 `prompts/` lives on the Hub, not in this repo, and this suite never touches the
 network, so `tests/hub_prompts.json` stands in for it: per task, its file and the
-placeholders its templates read. It records what the Hub **has**, defects
-included -- `python -m uad_data.check_hub_prompts` re-checks it against the real
-Hub and `--write` refreshes it, so a contract recording a fix that had not landed
-would leave this suite green while runs stayed broken, and would go red the next
-time anyone refreshed it.
+placeholders its templates read. What it records is what the Hub **has**, never
+what someone means the Hub to have -- `python -m uad_data.check_hub_prompts`
+re-checks it against the real Hub and `--write` refreshes it, so a recording that
+described a fix nobody had pushed would leave this suite green while real runs
+stayed broken, and would go red the next time anyone refreshed it.
+
+That cuts both ways, and the second way is why there is no carve-out below. A
+failure here is a statement about the Hub, so it is answered on the Hub -- edit
+or delete the file, then `--write` -- and not by teaching the test to expect the
+defect. The two files that made that tempting (`sentiment_analysis.json` and
+`intonation_detection.json`, each reading a name its task's features never
+supplied) are gone from the Hub and their tasks are gone from `Task`, so the
+invariants are unconditional again.
 
 Runnable directly (`python tests/test_prompt_contract.py`) or under pytest.
 """
@@ -26,29 +34,6 @@ import json
 from uad_data.check_hub_prompts import contract_path
 from uad_data.internal_datasets import DATASETS_DIRECTORY
 from uad_data.tasks import Task
-
-# Tasks with a prompt file that no internal dataset registers. Both label
-# something `classification` now carries instead (ADR-0008), so their files are
-# dead weight -- but the members have to stay in `Task` while the files are on
-# the Hub, because `_get_prompt_templates` builds a `PromptFilepath` for every
-# file it globs and `Task(...)` would raise on an unknown one, taking every
-# other task's lookup down with it.
-UNREGISTERED_TASKS = {"sentiment_analysis", "intonation_detection"}
-
-# Prompt files on the Hub that read a name their task's `render_context` never
-# supplies, so every row they generate carries an empty string where the label
-# belongs. Recorded rather than asserted away: the fix is a Hub edit, not a code
-# change, and until it lands the contract has to say so out loud.
-#
-# Both are prompt files no internal dataset registers, so nothing renders them
-# today -- which is why this went unnoticed. Registering either without fixing
-# its file first would ship blank labels.
-KNOWN_BAD_PLACEHOLDERS = {
-    # `{{intonation}}`; Task.INTONATION_DETECTION.features gives `category`.
-    "intonation_detection": {"intonation"},
-    # `{{sentiment}}`; Task.SENTIMENT_ANALYSIS.features gives `Sentiment`.
-    "sentiment_analysis": {"sentiment"},
-}
 
 
 def _contract() -> dict:
@@ -77,6 +62,25 @@ def _unrenderable(task_value: str, entry: dict) -> set[str]:
     return set(entry["placeholders"]) - _render_context_keys(Task(task_value))
 
 
+def test_every_recorded_prompt_file_names_a_real_task() -> None:
+    """A prompt file for a task this code lacks breaks *every* task, not just its own.
+
+    `_get_prompt_templates` builds a `PromptFilepath` for every file it globs out
+    of `prompts/`, and that constructor calls `Task(...)`, so one file naming an
+    unknown task raises before any task's templates are found. That is why a
+    `Task` member and its prompt file have to be added and removed in one move --
+    and why this is checked before the tests that call `Task(...)` themselves,
+    which would otherwise fail with a bare ValueError instead of saying so.
+    """
+    unknown = sorted(t for t in _contract() if t not in {task.value for task in Task})
+    assert not unknown, (
+        f"tests/hub_prompts.json records {unknown}, which are not in Task. While such "
+        f"a file is on the Hub, _get_prompt_templates raises for every task. Add the "
+        f"Task member, or delete the file from the Hub and re-run "
+        f"`python -m uad_data.check_hub_prompts --write`.")
+    print(f"PASS: all {len(_contract())} recorded prompt files name a real Task.")
+
+
 def test_every_registered_task_has_a_prompt_file() -> None:
     contract = _contract()
     missing = sorted(
@@ -89,60 +93,51 @@ def test_every_registered_task_has_a_prompt_file() -> None:
     print(f"PASS: all {len(_registered_tasks())} registered tasks have a prompt file.")
 
 
-def test_no_registered_task_renders_a_blank() -> None:
-    """The invariant that matters: a task a dataset uses renders every placeholder."""
-    for task in sorted(_registered_tasks()):
-        entry = _contract()[task.value]
-        unrenderable = sorted(_unrenderable(task.value, entry))
+def test_no_prompt_file_renders_a_blank() -> None:
+    """Every placeholder on the Hub is a name its task's render context supplies.
+
+    Every file, not only the registered ones. A file nobody renders yet is the
+    one that gets this wrong and stays wrong -- that is the whole history of
+    `sentiment_analysis.json` and `intonation_detection.json` -- and the moment a
+    dataset registers it, the blank ships.
+    """
+    for task_value, entry in sorted(_contract().items()):
+        unrenderable = sorted(_unrenderable(task_value, entry))
+        task = Task(task_value)
         assert not unrenderable, (
             f"{entry['file']} reads {unrenderable}, which Task.{task.name}.render_context "
             f"never supplies (it gives {sorted(_render_context_keys(task))}). jinja2 "
             f"renders those as empty strings instead of failing, so every row of the "
             f"task is silently wrong. Fix the file on the Hub, then re-run "
             f"`python -m uad_data.check_hub_prompts --write`.")
-    print("PASS: no registered task's prompt file renders a blank.")
+    print(f"PASS: none of the {len(_contract())} prompt files renders a blank.")
 
 
-def test_the_only_unrenderable_placeholders_are_the_known_defects() -> None:
-    """Catches a new broken file, and clears itself when a known one is fixed."""
-    for task_value, entry in sorted(_contract().items()):
-        unrenderable = _unrenderable(task_value, entry)
-        recorded = KNOWN_BAD_PLACEHOLDERS.get(task_value, set())
-        assert unrenderable == recorded, (
-            f"{entry['file']} reads {sorted(unrenderable) or 'nothing'} that "
-            f"Task.{Task(task_value).name}.render_context does not supply; "
-            f"KNOWN_BAD_PLACEHOLDERS records {sorted(recorded) or 'nothing'}. "
-            f"If the Hub file was just fixed, drop the entry; if it was just broken, "
-            f"fix the file rather than recording it.")
-    print(f"PASS: the only unrenderable placeholders are {sorted(KNOWN_BAD_PLACEHOLDERS)}.")
+def test_every_prompt_file_has_a_dataset() -> None:
+    """A prompt file no dataset registers is dead weight, and dead weight rots.
 
+    Strict, where this used to permit a recorded set of known orphans. That
+    allowlist is what made an equality check wrong: a dataset legitimately
+    registering one of the listed tasks *shrank* the orphan set and failed the
+    test, with a message telling you to undo the registration. Emptying the
+    allowlist collapses the distinction -- `orphans <= set()` and
+    `orphans == set()` are the same assertion, because an empty set cannot shrink
+    -- so the strict form costs nothing and only the guidance had to change.
 
-def test_known_bad_placeholders_are_all_unregistered_tasks() -> None:
-    """A dataset must not be pointed at a prompt file known to render a blank."""
-    registered = {task.value for task in _registered_tasks()}
-    shipped = sorted(set(KNOWN_BAD_PLACEHOLDERS) & registered)
-    assert not shipped, (
-        f"{shipped} are registered in uad_data/internal_datasets.py and their prompt "
-        f"files are recorded as rendering a blank. Fix the file on the Hub before "
-        f"registering the task.")
-    print("PASS: no dataset registers a task whose prompt file is known broken.")
-
-
-def test_prompt_files_without_a_dataset_are_known() -> None:
-    """A new orphan means someone dropped a registration without its prompt file.
-
-    A subset, not an equality: a dataset that later registers `sentiment_analysis`
-    (ADR-0008 names this as the plausible next step for MELD's second axis) is a
-    legitimate change and should not fail here.
+    What still fires here is a prompt file uploaded ahead of the dataset that
+    registers its task, and that is worth a failure rather than an exemption:
+    it is exactly the state the two removed files sat in, unrendered by anything
+    and therefore unchecked by anyone, both reading a placeholder their task
+    never supplied. Land the file and the registration together.
     """
     registered = {task.value for task in _registered_tasks()}
-    orphans = set(_contract()) - registered
-    unexpected = sorted(orphans - UNREGISTERED_TASKS)
-    assert not unexpected, (
-        f"prompt files with no internal dataset: {unexpected}. Delete the file from "
-        f"the Hub (and its Task member) if the task is gone for good, or add it to "
-        f"UNREGISTERED_TASKS.")
-    print(f"PASS: the only prompt files without a dataset are {sorted(orphans)}.")
+    orphans = sorted(set(_contract()) - registered)
+    assert not orphans, (
+        f"prompt files with no internal dataset: {orphans}. Register the task on a "
+        f"dataset in uad_data/internal_datasets.py, or -- if it is gone for good -- "
+        f"delete the file from the Hub, drop its Task member, and re-run "
+        f"`python -m uad_data.check_hub_prompts --write`.")
+    print(f"PASS: all {len(_contract())} prompt files have a dataset that registers them.")
 
 
 def test_slurp_real_carries_its_intent_labels_as_classification() -> None:
@@ -154,9 +149,8 @@ def test_slurp_real_carries_its_intent_labels_as_classification() -> None:
 
 
 if __name__ == "__main__":
+    test_every_recorded_prompt_file_names_a_real_task()
     test_every_registered_task_has_a_prompt_file()
-    test_no_registered_task_renders_a_blank()
-    test_the_only_unrenderable_placeholders_are_the_known_defects()
-    test_known_bad_placeholders_are_all_unregistered_tasks()
-    test_prompt_files_without_a_dataset_are_known()
+    test_no_prompt_file_renders_a_blank()
+    test_every_prompt_file_has_a_dataset()
     test_slurp_real_carries_its_intent_labels_as_classification()
