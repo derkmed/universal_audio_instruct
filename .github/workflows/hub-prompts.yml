@@ -1,0 +1,59 @@
+# The offline suite checks the task registry against `tests/hub_prompts.json`,
+# which is a recording of the Hub's `prompts/` folder, not the folder itself. A
+# prompt file added, deleted or edited on the Hub cannot make that suite fail, so
+# this job is what notices -- the piece #57 was missing, where a registered task
+# with no prompt file reached a real run before anything complained.
+#
+# Weekly, and on demand. It reads one Hub folder, so it is cheap; it is separate
+# from `tests.yml` because it needs the network and a token, and the offline
+# suite must stay runnable without either.
+name: hub prompts
+
+on:
+  schedule:
+    # Mondays, 07:00 UTC.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # `python -m uad_data.check_hub_prompts` imports `uad_data/__init__.py`
+      # first, so this pulls in `loader` and everything under it -- not just the
+      # three modules the command itself uses. That graph needs no torch today
+      # (nothing in `uad_data` imports it, and `datasets` only probes for it with
+      # `find_spec`), which is why this install list is so much smaller than
+      # `requirements.txt`. A bare `import torch` anywhere in the graph would
+      # break this job, so check the whole of `uad_data`, not those three files.
+      #
+      # `datasets` is pinned to match `requirements.txt`: unpinned it resolves
+      # several majors ahead, and `tasks.py` and `internal_dataset.py` both call
+      # `datasets.Value` / `datasets.Split`. A weekly job that reddens for a
+      # reason unrelated to the Hub is a weekly job people stop reading.
+      - name: Install what the check needs
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . huggingface_hub jinja2 'datasets==3.6.0'
+
+      - name: Check the Hub's prompts against tests/hub_prompts.json
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        # The dataset repo is private, so without the secret there is nothing to
+        # check. Say so and stop rather than failing: a fork has no secret, and a
+        # red X nobody can fix is a red X everybody learns to ignore.
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::notice::HF_TOKEN is not set, so the Hub cannot be read. Skipping."
+            exit 0
+          fi
+          python -m uad_data.check_hub_prompts

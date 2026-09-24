@@ -13,20 +13,20 @@ from typing import Any
 
 class Task(enum.Enum):
     """Enum class for Audio Understanding tasks."""
+    # A task is named for what it asks the model to do, with no suffix for its
+    # shape. The old rule -- "classification tasks should be suffixed with
+    # 'classification'" -- is retired by ADR-0008: a dataset labels one axis and
+    # that axis is `classification`, so there are no suffixed siblings left for a
+    # suffix to tell apart.
     ASR = "asr"
     ASR_TIMESTAMP_SEARCH = "asr_timestamp_search"
     CLASSIFICATION = "classification"
-    # Classification tasks should be suffixed with 'classification'.
-    SENTIMENT_ANALYSIS = "sentiment_analysis"
     CAPTION = "caption"
     COMMONSENSE = "commonsense"
     COMMONSENSE_HARD = "commonsense_hard"
     QA = "qa"
     ENGLISH_TRANSLATION = "english_translation"
-    INTONATION_DETECTION = "intonation_detection"
-    INTENT_DETECTION = "intent_detection"
     INTENT_DETECTION_NL = "intent_detection_nl"
-    ACTION_CLASSIFICATION = "action_classification"
 
     @property
     def features(self) -> dict[str, Any]:
@@ -52,8 +52,6 @@ class Task(enum.Enum):
             }
         elif self == Task.ASR:
             return {'transcription': datasets.Value('string')}
-        elif self == Task.SENTIMENT_ANALYSIS:
-            return {'Sentiment': datasets.Value('string')}
         elif self == Task.CAPTION:
             return {'caption': datasets.Value('string')}
         elif self == Task.COMMONSENSE:
@@ -72,12 +70,6 @@ class Task(enum.Enum):
             return {"english_translation": datasets.Value("string")}
         elif self == Task.INTENT_DETECTION_NL:
             return {"intent_nl": datasets.Value("string")}
-        elif self == Task.INTENT_DETECTION:
-            return {"intent": datasets.Value("string")}
-        elif self == Task.ACTION_CLASSIFICATION:
-            return {"action": datasets.Value("string")}
-        elif self == Task.INTONATION_DETECTION:
-            return {"category": datasets.Value("string")}
         else:
             raise NotImplementedError(
                 f'{self.value} prompt handling not yet implemented.')
